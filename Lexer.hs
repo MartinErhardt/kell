@@ -35,49 +35,39 @@ data Token = Word String
   | For      -- for
   | NEWLINE
   | EOF
+
+  | NEOF     -- internal use only
   deriving (Show, Eq)
--- escape :: String -> Parser [Token]
--- escape = do 
--- 	c <- char
--- 	return [Word (c:body)]
---eofWordEnd :: String -> CharParser st Token
-eofWordEnd word = do
-  eof
-  if word == "" then unexpected("unexpected EOF")
-                else return $ Word word
+ 
+comment :: Parser [Token] -> Parser [Token] -> Parser [Token]
+comment callback eofA = eofA <|> (char '\n' >> callback) <|> (anyChar   >> (comment callback eofA))
 
-eofSquote=(eof >> unexpected("unexpected eof while looking for '"))
-quote body = eofSquote <|> do
-  c <- anyChar 
-  case c of '\'' -> parseWord body
-            _ -> quote $ body++[c]
+appendChar :: Char -> [Token] -> Parser [Token]
+appendChar c ((Word r):o) = return $ [Word $ [c] ++ r] ++ o
 
---dquote :: String -> CharParser st Token
-dquote body = eofDquote <|> do
-  c <- anyChar
-  case c of '"' -> parseWord body -- return [Word body]
-            '\\' -> eofDquote <|> do{
-              c2 <- anyChar;
-              if c2 `elem` ['`', '"',   '\'',   '\n'] then dquote $ body++[c2] else dquote $ body++[c,c2]
-            }
-            _ -> dquote $ body++[c]
-  where eofDquote =(eof >> unexpected("unexpected eof while looking for \"")) --quote :: String -> CharParser st Token
+escape :: Parser [Token] -> Parser [Token]
+escape callback = (anyChar >>= (\c2 -> callback >>= (\((Word r):o) -> return $ [Word $ ['\\',c2] ++ r] ++ o ) ) )
 
---parseWord :: String -> CharParser st Token
-parseWord word = eofWordEnd word <|> do
-  c <- anyChar
-  case c of '\n' -> return $ Word $ word++[c] -- Hack: will remove newline later and add as seperate token
-            ' ' -> if word == "" then unexpected("expected word") else return $ Word $ word++[c]
-            '"' -> dquote $ word++[c]
-            '\'' -> quote $ word++[c]
-            '\\' -> do{
-              c2 <- anyChar;
-              parseWord $ word++[c,c2]
-            }
-            _ -> parseWord $ word++[c]
+quote :: Char -> Parser [Token]
+quote mark = let eofA = (eof >> unexpected("mising quote end") ) in eofA
+            <|> (char '\\' >> (eofA <|> escape (quote mark) ) )
+            <|> (char mark >> parseWord >>= appendChar mark )
+            <|> (char '#'  >> comment (quote mark) eofA ) 
+            <|> (anyChar   >>= (\c -> (quote mark) >>= appendChar c ) ) 
 
-lexSingle :: Parser Token
-lexSingle = foldl1 (<|>) ((\(a,b)-> try $ string a >> return b) <$> reservedOps)  <|> parseWord "" -- not the most runtime efficient, but proud on neat functional pattern
+parseWord :: Parser [Token]
+parseWord = let eofA = (eof >> return [Word "", NEOF])
+                endNewline = (eof >> (return $ [Word "",NEWLINE,EOF])) <|> (return $ [Word "",NEWLINE] ) in eofA
+            <|> (char ' '  >> ((eof >> (return $ [Word "",EOF])) <|> (return $ [Word ""] ) ) ) -- parse delimiter NOTE: delimiter will be removed later 
+            <|> (char '\n' >> endNewline)
+            <|> (char '\\' >> (eofA <|> escape parseWord) )                                    -- parse quotes
+            <|> (char '\'' >> quote '\''       >>= appendChar '\''  ) 
+            <|> (char '"'  >> quote '"'        >>= appendChar '"'  )
+            <|> (char '#'  >> comment endNewline eofA )                                        -- parse comment
+            <|> (anyChar   >>= (\c-> parseWord >>= appendChar c ) )                               -- parse letter
+
+lexSingle :: Parser [Token]
+lexSingle = foldl1 (<|>) ((\(a,b)-> try $ string a >> return [b]) <$> reservedOps)  <|> parseWord  -- not the most runtime efficient
   where reservedOps=[("&&",AND_IF)
                     ,("||", OR_IF)
                     ,(";;", DSEMI)
@@ -101,26 +91,10 @@ lexSingle = foldl1 (<|>) ((\(a,b)-> try $ string a >> return b) <$> reservedOps)
                     ,("until", Until)
                     ,("for", For)]
 
-removeLast = reverse . tail . reverse -- slow ass
-
-deEOF :: Token -> [Token]
-deEOF (Word w) = case last w of '\n' -> [(Word $ removeLast w),EOF]
-                                ' '  -> [(Word $ removeLast w),EOF]
-                                _ ->    [(Word w)]
-deEOF t=[t]
-
-
-deDelimit :: Token -> [Token]
-deDelimit (Word w) = case last w of '\n' -> [(Word $ removeLast w)]
-                                    ' '  -> [(Word $ removeLast w)]
-                                    _ ->    [(Word w)]
-deDelimit t=[t]
+removeLast = reverse . tail . reverse
 
 lexer :: Parser [Token]
-lexer = (char ' ' >> lexer) <|> (eof >> return [EOF]) <|> do
-  t <- lexSingle
-  (eof>> (return $ deEOF t) ) <|> (lexer>>= (\l -> return $ (deDelimit t++l)) )
---
---  word <- lexSingle
---  try(eof >> (return $ words++[EOF]) ) <|> (return words)
+lexer = let eofFinal = (eof >> return [EOF]) in eofFinal
+        <|> (char ' ' >> lexer) <|> (char '#' >> comment (lexer>>= (\l -> return $ [NEWLINE]++l)) eofFinal)
+        <|> ( ( \a b -> if last a == NEOF then removeLast a else ( if last a == EOF then a else a++b ) ) <$> lexSingle <*> lexer)
 
