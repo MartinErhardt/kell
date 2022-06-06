@@ -68,10 +68,6 @@ parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return $ [b]) ) <$
                     ,(";",     SEMI)
                     ,("|",     PIPE)]
 
- 
-comment :: Parser [Token] -> Parser [Token] -> Parser [Token]
-comment callback eofA = eofA <|> (char '\n' >> callback) <|> (anyChar >> (comment callback eofA))
-
 appendStr :: String -> [Token] -> Parser [Token]
 appendStr s ((Word r):o) = return $ [Word $ s ++ r] ++ o
 
@@ -81,7 +77,6 @@ escape callback = (anyChar >>= (\c2 -> callback >>= (\((Word r):o) -> return $ [
 quote :: Parser [Token] -> Parser [Token]
 quote endCondition = let eofA = (eof >> unexpected("mising quote end") ) in eofA <|> endCondition
             <|> (char '\\' >> (eofA <|> escape (quote endCondition) ) )
-            <|> (char '#'  >> comment (quote endCondition >>= appendStr "\n") eofA ) 
             <|> (anyChar   >>= (\c -> (quote endCondition) >>= appendStr [c] ) )
 
 
@@ -94,28 +89,28 @@ wordExpansion s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern mat
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) =try $ string str >> (if stackIsEmpty a then parseWord else quote (wordExpansion a) ) >>= appendStr str
+        stackHandler (str, (Just a)) = try $ string str >> (if stackIsEmpty a then parseWord else quote (wordExpansion a) ) >>= appendStr str
         stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
 
 appendTokens toA =( (++) <$> return toA <*> lexer)
-delimit :: [Token] -> Parser [Token]
-delimit delimiters = appendTokens $ [Word ""] ++ delimiters
-                
+
 parseWord :: Parser [Token]
-parseWord = let eofA = (eof >> return [Word ""]) in eofA
+parseWord = let eofA = (eof >> return [Word ""]) 
+                delimit delimiters = appendTokens $ [Word ""] ++ delimiters in eofA
             <|> (parseReservedOp >>= (\opl -> delimit opl ) )
-            <|> (char ' '  >> delimit []) -- parse delimiter NOTE: delimiter will be removed later 
+            <|> (char ' '  >> delimit [])                                                               -- parse delimiter NOTE: delimiter will be removed later 
             <|> (char '\n' >> delimit [NEWLINE] )
-            <|> (char '\\' >> (eofA <|> escape parseWord) )                                    -- parse quotes
+            <|> (char '\\' >> (eofA <|> escape parseWord) )                                             -- parse quotes
             <|> (char '\'' >> quote (char '\''>> (parseWord >>= appendStr "'" ) ) >>= appendStr "'") 
             <|> (char '"'  >> quote (char '"' >> (parseWord >>= appendStr "\"") ) >>= appendStr "\""  )
-            <|> wordExpansion stackNew                                                         -- word expansion
-            <|> (char '#'  >> comment (delimit []) eofA )                                        -- parse comment
-            <|> (anyChar   >>= (\c-> parseWord >>= appendStr [c] ) )                           -- parse letter
+            <|> wordExpansion stackNew                                                                  -- word expansion
+            <|> (anyChar   >>= (\c-> parseWord >>= appendStr [c] ) )                                    -- parse letter
 
 lexer :: Parser [Token]
-lexer = (eof>> return [EOF]) 
+lexer = let eofA = (eof>> return [EOF])
+            comment = (eofA <|> (char '\n' >> appendTokens [NEWLINE]) <|> (anyChar >> comment)) in eofA
         <|> (parseReservedOp >>= appendTokens)
         <|> (char '\n' >> appendTokens [NEWLINE])
+        <|> (char '#' >> comment)
         <|> (char ' ' >> lexer) <|> parseWord
 
