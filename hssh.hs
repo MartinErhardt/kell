@@ -1,7 +1,9 @@
-import Lexer
---import ShParser
-import Text.Parsec
+--import Lexer
+import Exec
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.State.Lazy
+import System.Exit
+import System.Posix.Process
 main :: IO ()
---main = getLine >>= print . parseExpr >> main
-main = getLine >>= print . (parse lexer "stdin") >> main
---main = print $ parse lexer "stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
+main = getLine >>= (\cmd -> evalStateT (launchCmdSub cmd) getDefaultShellEnv) >>= print >> main-- >> exitImmediately ExitSuccess
+-- main = print $ parse lexer "stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
