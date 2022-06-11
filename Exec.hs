@@ -19,7 +19,7 @@ import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
 
-data ShellEnv = ShellEnv { var :: Map.Map String (Maybe String)
+data ShellEnv = ShellEnv { var :: Map.Map String String
                                 -- , func :: Map.Map String String
                                  } deriving(Eq, Show)
 type Shell = StateT ShellEnv IO 
@@ -53,14 +53,13 @@ launchCmdSub cmd = do
   -- lift $ signalProcess killProcess forkedPId
 
 type Field = String
-getVar :: String -> Shell (Maybe (Maybe String))
+getVar :: String -> Shell (Maybe String)
 getVar name = get >>= (\s -> return $ Map.lookup name (var s))
 
 expandParams :: String -> Shell String
 expandParams name = do
   var <- getVar name
-  return $ case var of (Just(Just val)) -> val -- set and not null
-                       (Just Nothing)   -> ""  -- null
+  return $ case var of (Just val) -> val -- set and not null
                        (Nothing)        -> ""  -- unset
 
 fieldExpand :: String -> Shell [Field]
