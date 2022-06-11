@@ -93,29 +93,24 @@ wordExpansion f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern m
         stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (wordExpansion id a) >>= return . (str++)
         stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
 
-appendTokens :: [Token] -> Parser [Token]
-appendTokens toA =( (++) <$> return toA <*> lexer)
-
-appendStr :: String -> Parser [Token]
-appendStr s = parseWord >>= (\((Word r):o) -> return $ [Word $ s ++ r] ++ o)
-
 parseWord :: Parser [Token]
-parseWord = let eofA = (eof >> return [Word ""]) 
-                delimit delimiters = appendTokens $ [Word ""] ++ delimiters in eofA
-            <|> (parseReservedOp >>= (\op -> delimit . (:[]) $ op ) )
-            <|> (char ' '  >> delimit [])                                                              -- NOTE: delimiter will be removed later 
-            <|> (char '\n' >> delimit [NEWLINE] )
-            <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) ) -- parse quotes
-            <|> (char '\'' >> ((quote (char '\''>> return "'" ) ) >>= appendStr . ("'"++) ) )
+parseWord = let eofA = (eof >> return [Word ""])
+                appendStr s = parseWord >>= (\((Word r):o) -> return $ [Word $ s ++ r] ++ o)
+                delimit delimiters = ( (([Word ""] ++ delimiters) ++) <$> lexer) in eofA
+            <|> (parseReservedOp >>= delimit . (:[]) ) 
+            <|> (char ' '        >>  delimit []      )                                                 -- NOTE: delimiter will be removed later 
+            <|> (char '\n'       >>  delimit [NEWLINE] )
+            <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) )  -- parse quotes
+            <|> (char '\'' >> ((quote (char '\''>> return "'" ) )   >>= appendStr . ("'"++) ) )
             <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) )       -- TODO <|> wordExpansion
             <|> (wordExpansion id stackNew >>= return . (:[]) . Word )                                 -- word expansion
             <|> (anyChar   >>= appendStr .  (:[])  )                                                   -- parse letter
 
 lexer :: Parser [Token]
 lexer = let eofA = (eof>> return [EOF])
-            comment = (eofA <|> (char '\n' >> appendTokens [NEWLINE]) <|> (anyChar >> comment)) in eofA
-        <|> (parseReservedOp >>= appendTokens . (:[]) )
-        <|> (char '\n' >> appendTokens [NEWLINE])
-        <|> (char '#' >> comment)
-        <|> (char ' ' >> lexer) <|> parseWord
+            comment = (eofA <|> (char '\n' >> (([NEWLINE]++) <$> lexer )) <|> (anyChar >> comment)) in eofA
+        <|> (           ( (++) . (:[]) ) <$> parseReservedOp <*> lexer )
+        <|> (char '\n'       >>               (([NEWLINE]++) <$> lexer ) )
+        <|> (char '#'        >> comment)
+        <|> (char ' '        >> lexer) <|> parseWord
 
