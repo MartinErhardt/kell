@@ -80,10 +80,10 @@ getVarExp :: [String] -> Parser String
 getVarExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
 
 getCmdSubExp :: Parser String
-getCmdSubExp = char '(' >> wordExpansion (\_ -> "") (stackPush stackNew ")")
+getCmdSubExp = char '(' >> getDollarExp (\_ -> "") (stackPush stackNew ")")
 
 getParamExp :: Parser String
-getParamExp = char '{' >> wordExpansion (\_ -> "") (stackPush stackNew "}")
+getParamExp = char '{' >>  getDollarExp (\_ -> "") (stackPush stackNew "}")
 
 escapeUnorigQuotes :: Parser String
 escapeUnorigQuotes = (eof >> return "") <|> do 

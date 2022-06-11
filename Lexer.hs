@@ -1,8 +1,8 @@
 module Lexer
 ( lexer,
-  wordExpansion,
-  quote,
-  quoteEsc
+  getDollarExp,
+  quoteEsc,
+  quote
 ) where
 import Text.Parsec
 -- TODO No proper wchar support
@@ -73,16 +73,16 @@ parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> re
 
 
 quoteEsc :: String -> Parser String -> Parser String
-quoteEsc esc endCondition = let eofA = (eof >> unexpected("mising quote end") )
-                                escape c = (char c >> (eofA <|> (++) . (:[]) <$> anyChar <*> quoteEsc esc endCondition) ) in eofA <|> endCondition
-            <|> foldl1 (<|>) ( escape <$> esc )
-            <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc esc endCondition) )
+quoteEsc escIdents endCondition = let eofA = (eof >> unexpected("mising quote end") )
+                                      escape c = (char c >> (eofA <|> (++) . (:[]) <$> anyChar <*> quoteEsc escIdents endCondition) ) in eofA <|> endCondition
+            <|> foldl1 (<|>) ( escape <$> escIdents )
+            <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc escIdents endCondition) )
 
 quote :: Parser String -> Parser String
 quote = quoteEsc "\\"
 
-wordExpansion :: (String -> String) -> Stack String -> Parser String
-wordExpansion f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
+getDollarExp :: (String -> String) -> Stack String -> Parser String
+getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
   where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing else (\(Just s)-> Just $ fst s) $ stackPop s
         stackAction s = [("$((", Just $ stackPush s "))")
                         ,("$(",  Just $ stackPush s ")")
@@ -90,7 +90,7 @@ wordExpansion f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern m
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (wordExpansion id a) >>= return . (str++)
+        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (getDollarExp id a) >>= return . (str++)
         stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
 
 parseWord :: Parser [Token]
@@ -103,7 +103,7 @@ parseWord = let eofA = (eof >> return [Word ""])
             <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) )  -- parse quotes
             <|> (char '\'' >> ((quote (char '\''>> return "'" ) )   >>= appendStr . ("'"++) ) )
             <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) )       -- TODO <|> wordExpansion
-            <|> (wordExpansion id stackNew >>= return . (:[]) . Word )                                 -- word expansion
+            <|> (getDollarExp id stackNew >>= return . (:[]) . Word )                                  -- word expansion
             <|> (anyChar   >>= appendStr .  (:[])  )                                                   -- parse letter
 
 lexer :: Parser [Token]
