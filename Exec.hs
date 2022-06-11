@@ -19,25 +19,25 @@ import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
 
-data ShellEnvData = ShellEnvData { var :: Map.Map String (Maybe String)
+data ShellEnv = ShellEnv { var :: Map.Map String (Maybe String)
                                 -- , func :: Map.Map String String
                                  } deriving(Eq, Show)
-type ShellEnv = StateT ShellEnvData IO 
-exec :: String -> ShellEnv (Maybe ProcessStatus)
+type Shell = StateT ShellEnv IO 
+exec :: String -> Shell (Maybe ProcessStatus)
 exec cmd = expandWord cmd >>= (\fs -> launchCmd (head fs) (tail fs) (return ()) ) -- fold all commandwords and do assignments prior to that
 --exec cmd = let tokens = parse lexer "stdin" cmd in lift $ print tokens
 
-getDefaultShellEnv :: ShellEnvData
-getDefaultShellEnv = ShellEnvData Map.empty
+getDefaultShellEnv :: ShellEnv
+getDefaultShellEnv = ShellEnv Map.empty
 
-launchCmd :: FilePath -> [String] -> IO () -> ShellEnv (Maybe ProcessStatus)
+launchCmd :: FilePath -> [String] -> IO () -> Shell (Maybe ProcessStatus)
 launchCmd cmd args redirects = do
   forkedPId <- lift . forkProcess $ do
     redirects
     getEnvironment >>= (\env -> executeFile cmd True args (Just env) )
   lift $ getProcessStatus False False forkedPId
 
-launchCmdSub :: String -> ShellEnv String
+launchCmdSub :: String -> Shell String
 launchCmdSub cmd = do
   pipe      <- lift createPipe
   curEnv    <- get
@@ -53,17 +53,17 @@ launchCmdSub cmd = do
   -- lift $ signalProcess killProcess forkedPId
 
 type Field = String
-getVar :: String -> ShellEnv (Maybe (Maybe String))
+getVar :: String -> Shell (Maybe (Maybe String))
 getVar name = get >>= (\s -> return $ Map.lookup name (var s))
 
-expandParams :: String -> ShellEnv String
+expandParams :: String -> Shell String
 expandParams name = do
   var <- getVar name
   return $ case var of (Just(Just val)) -> val -- set and not null
                        (Just Nothing)   -> ""  -- null
                        (Nothing)        -> ""  -- unset
 
-fieldExpand :: String -> ShellEnv [Field]
+fieldExpand :: String -> Shell [Field]
 fieldExpand s = expandParams "IFS" >>= (flip parse2Shell) s . split2F 
 
 split2F :: String -> Parser [Field]
@@ -100,26 +100,26 @@ removeEscReSplit = (eof >> return [""])
 removeQuotes :: Parser String
 removeQuotes = (eof >> return "")
            <|> (char '\''   >> (++) <$> quoteEsc ['\xfe','\\'] (char '\'' >> return "") <*> removeQuotes )
-           <|> (char '"'    >> (++) <$> quoteEsc ['\xfe','\\'] (char '"' >> return "")  <*> removeQuotes )
+           <|> (char '"'    >> (++) <$> quoteEsc ['\xfe','\\'] (char '"'  >> return "") <*> removeQuotes )
            <|> (char '\\'   >> (++) <$> (anyChar >>= return . (:[]) )                   <*> removeQuotes )
            <|> (char '\xfe' >> (++) <$> (anyChar >>= return . (['\xfe']++) . (:[]) )    <*> removeQuotes )
            <|> (               (++) <$> (anyChar >>= return . (:[]) )                   <*> removeQuotes )
 
-parse2ShellD :: Parser (ShellEnv a) -> String -> ShellEnv a
+parse2ShellD :: Parser (Shell a) -> String -> Shell a
 parse2ShellD parser s = (\(Right v) -> v) $ parse parser "stdin" s
 
-parse2Shell :: (Show a) => Parser a -> String -> ShellEnv a
+parse2Shell :: (Show a) => Parser a -> String -> Shell a
 parse2Shell parser s = let res = parse parser "string" s in do
 --  lift $ print res
   (return . (\(Right v) -> v)) res
 --  where handler parseRes = case parseRes of (Right v) -> return v
 --                                            (Lefti e)    -> print e
-joinFields :: Parser (ShellEnv [Field]) -> Parser (ShellEnv [Field]) -> Parser (ShellEnv [Field])
+joinFields :: Parser (Shell [Field]) -> Parser (Shell [Field]) -> Parser (Shell [Field])
 joinFields parser1 parser2 = combine <$> parser1 <*> parser2
   where ppJoinEnds l1 l2 = init l1 ++ [last l1 ++ head l2] ++ tail l2
         combine fieldL1 fieldL2 = ppJoinEnds <$> fieldL1 <*> fieldL2
 
-parseExps :: [String] -> Parser (ShellEnv [Field])
+parseExps :: [String] -> Parser (Shell [Field])
 parseExps names = (eof >> (return . return) [""])
         <|> (char '$'  >>  joinFields (expDetected fieldExpand) (parseExps names)) -- TODO quoted expansions
         <|> (char '\'' >>  quote (char '\'' >> return "'") >>= appendStr . ("'" ++ ) )
@@ -130,7 +130,7 @@ parseExps names = (eof >> (return . return) [""])
         appendStr str = parseExps names >>= (\shAction -> return $ shAction >>=(\fs -> return $ [str ++ head fs] ++ tail fs) )
 
 
-expandWord :: String -> ShellEnv [Field]
+expandWord :: String -> Shell [Field]
 expandWord cmdWord = do
   env <- get
   fs <- let names = (fst <$> (Map.toList $ var env) ) in parse2ShellD (parseExps names) cmdWord
@@ -142,7 +142,6 @@ expandWord cmdWord = do
   noQuotes <- parse2Shell removeQuotes ( concat $ L.intersperse ['\xff'] fs)
 --  lift $ print noQuotes
   parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
---expandWord String -> ShellEnv [Field]
+--expandWord String -> Shell [Field]
 --expandWord word = foldl1 (\a b -> ppJoinEnds <$> a <*> b ) (parseRes parseExps word)
 --  where ppJoinEnds a b = init a ++ [last a ++ head b] ++ tail b
-
