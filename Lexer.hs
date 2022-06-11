@@ -1,5 +1,8 @@
 module Lexer
-( lexer
+( lexer,
+  wordExpansion,
+  quote,
+  quoteEsc
 ) where
 import Text.Parsec
 -- TODO No proper wchar support
@@ -69,17 +72,17 @@ parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> re
                     ,("|",     PIPE)]
 
 
-escape :: Parser String
-escape = (anyChar >>= (\c2 ->  return ['\\',c2] ) )
+quoteEsc :: String -> Parser String -> Parser String
+quoteEsc esc endCondition = let eofA = (eof >> unexpected("mising quote end") )
+                                escape c = (char c >> (eofA <|> (++) . (:[]) <$> anyChar <*> quoteEsc esc endCondition) ) in eofA <|> endCondition
+            <|> foldl1 (<|>) ( escape <$> esc )
+            <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc esc endCondition) )
 
 quote :: Parser String -> Parser String
-quote endCondition = let eofA = (eof >> unexpected("mising quote end") ) in eofA <|> endCondition
-            <|> (char '\\' >> (eofA <|> ( escape >>= (\el -> quote endCondition >>= return . (el++) ) ) ) )
-            <|> (anyChar   >>= (\c -> (quote endCondition) >>= return . ([c]++) ) )
+quote = quoteEsc "\\"
 
-
-wordExpansion :: Stack String -> Parser String
-wordExpansion s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
+wordExpansion :: (String -> String) -> Stack String -> Parser String
+wordExpansion f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
   where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing else (\(Just s)-> Just $ fst s) $ stackPop s
         stackAction s = [("$((", Just $ stackPush s "))")
                         ,("$(",  Just $ stackPush s ")")
@@ -87,7 +90,7 @@ wordExpansion s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern mat
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = try $ string str >> (if stackIsEmpty a then return "" else quote (wordExpansion a) ) >>= return . (str++)
+        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (wordExpansion id a) >>= return . (str++)
         stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
 
 appendTokens :: [Token] -> Parser [Token]
@@ -100,13 +103,13 @@ parseWord :: Parser [Token]
 parseWord = let eofA = (eof >> return [Word ""]) 
                 delimit delimiters = appendTokens $ [Word ""] ++ delimiters in eofA
             <|> (parseReservedOp >>= (\op -> delimit . (:[]) $ op ) )
-            <|> (char ' '  >> delimit [])                                                               -- parse delimiter NOTE: delimiter will be removed later 
+            <|> (char ' '  >> delimit [])                                                              -- NOTE: delimiter will be removed later 
             <|> (char '\n' >> delimit [NEWLINE] )
-            <|> (char '\\' >> (eofA <|> ( escape >>= appendStr ) ) )                 -- parse quotes
+            <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) ) -- parse quotes
             <|> (char '\'' >> ((quote (char '\''>> return "'" ) ) >>= appendStr . ("'"++) ) )
-            <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) ) -- TODO <|> wordExpansion
-            <|> (wordExpansion stackNew >>= return . (:[]) . Word )                                          -- word expansion
-            <|> (anyChar   >>= appendStr .  (:[])  )                                    -- parse letter
+            <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) )       -- TODO <|> wordExpansion
+            <|> (wordExpansion id stackNew >>= return . (:[]) . Word )                                 -- word expansion
+            <|> (anyChar   >>= appendStr .  (:[])  )                                                   -- parse letter
 
 lexer :: Parser [Token]
 lexer = let eofA = (eof>> return [EOF])
