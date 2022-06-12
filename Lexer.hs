@@ -2,7 +2,9 @@ module Lexer
 ( lexer,
   getDollarExp,
   quoteEsc,
-  quote
+  quote,
+  dQuote,
+  escape
 ) where
 import Text.Parsec
 -- TODO No proper wchar support
@@ -71,15 +73,19 @@ parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> re
                     ,(";",     SEMI)
                     ,("|",     PIPE)]
 
+escape :: Char -> Parser String
+escape identifier = char identifier >> ([identifier]++) .(:[]) <$> anyChar
 
-quoteEsc :: String -> Parser String -> Parser String
-quoteEsc escIdents endCondition = let eofA = (eof >> unexpected("mising quote end") )
-                                      escape c = (char c >> (eofA <|> (++) . (:[]) <$> anyChar <*> quoteEsc escIdents endCondition) ) in eofA <|> endCondition
-            <|> foldl1 (<|>) ( escape <$> escIdents )
-            <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc escIdents endCondition) )
+quoteEsc :: Parser (String -> String) -> Parser String -> Parser String
+quoteEsc recCondition endCondition = (eof >> unexpected("mising quote end") )  <|> endCondition
+                                 <|> (recCondition              <*> (quoteEsc recCondition endCondition) )
+                                 <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc recCondition endCondition) )
 
 quote :: Parser String -> Parser String
-quote = quoteEsc "\\"
+quote = quoteEsc $ (++) <$> escape '\\' -- TODO catch and specify parse error with <?>
+
+dQuote :: Parser String -> Parser String
+dQuote = quoteEsc $ (++) <$> (escape '\\' <|> (getDollarExp id stackNew ) )
 
 getDollarExp :: (String -> String) -> Stack String -> Parser String
 getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
@@ -100,11 +106,11 @@ parseWord = let eofA = (eof >> return [Word ""])
             <|> (parseReservedOp >>= delimit . (:[]) ) 
             <|> (char ' '        >>  delimit []      )                                                 -- NOTE: delimiter will be removed later 
             <|> (char '\n'       >>  delimit [NEWLINE] )
-            <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) )  -- parse quotes
-            <|> (char '\'' >> ((quote (char '\''>> return "'" ) )   >>= appendStr . ("'"++) ) )
-            <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) )       -- TODO <|> wordExpansion
-            <|> (getDollarExp id stackNew                           >>= appendStr )                    -- word expansion
-            <|> (anyChar                                            >>= appendStr .  (:[])  )          -- parse letter
+            <|> (             escape '\\'                      >>= appendStr )  -- parse quotes
+            <|> (char '\'' >> quote (char '\''>> return "'" )  >>= appendStr . ("'"++) )
+            <|> (char '"'  >> dQuote (char '"' >> return "\"") >>= appendStr . ("\""++) )       -- TODO <|> wordExpansion
+            <|> (getDollarExp id stackNew                      >>= appendStr )                    -- word expansion
+            <|> (anyChar                                       >>= appendStr .  (:[])  )          -- parse letter
 
 lexer :: Parser [Token]
 lexer = let eofA = (eof>> return [EOF])
