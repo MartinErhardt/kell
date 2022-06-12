@@ -90,7 +90,7 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (getDollarExp id a) >>= return . (str++)
+        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (getDollarExp f a) >>= return . (str++)
         stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
 
 parseWord :: Parser [Token]
@@ -103,8 +103,8 @@ parseWord = let eofA = (eof >> return [Word ""])
             <|> (char '\\' >> (eofA <|> ( anyChar >>= return . (['\\']++) . (:[]) >>= appendStr ) ) )  -- parse quotes
             <|> (char '\'' >> ((quote (char '\''>> return "'" ) )   >>= appendStr . ("'"++) ) )
             <|> (char '"'  >> ((quote (char '"' >> return "\""  ) ) >>= appendStr . ("\""++) ) )       -- TODO <|> wordExpansion
-            <|> (getDollarExp id stackNew >>= return . (:[]) . Word )                                  -- word expansion
-            <|> (anyChar   >>= appendStr .  (:[])  )                                                   -- parse letter
+            <|> (getDollarExp id stackNew                           >>= appendStr )                    -- word expansion
+            <|> (anyChar                                            >>= appendStr .  (:[])  )          -- parse letter
 
 lexer :: Parser [Token]
 lexer = let eofA = (eof>> return [EOF])

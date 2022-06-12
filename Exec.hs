@@ -28,7 +28,7 @@ exec cmd = expandWord cmd >>= (\fs -> launchCmd (head fs) (tail fs) (return ()) 
 --exec cmd = let tokens = parse lexer "stdin" cmd in lift $ print tokens
 
 getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv Map.empty
+getDefaultShellEnv = ShellEnv $ Map.fromList [("var1","uname --all"),("var2","val2")]
 
 launchCmd :: FilePath -> [String] -> IO () -> Shell (Maybe ProcessStatus)
 launchCmd cmd args redirects = do
@@ -60,29 +60,35 @@ expandParams :: String -> Shell String
 expandParams name = do
   var <- getVar name
   return $ case var of (Just val) -> val -- set and not null
-                       (Nothing)        -> ""  -- unset
+                       (Nothing)        -> " \t\n"  -- unset
 
 fieldExpand :: String -> Shell [Field]
-fieldExpand s = expandParams "IFS" >>= (flip parse2Shell) s . split2F 
+fieldExpand s = do
+  ifs <- expandParams "IFS"
+  lift $ print ifs
+  res <- (flip parse2Shell) s $ split2F ifs
+  lift $ print res
+  return res
+--fieldExpand s = expandParams "IFS" >>= (flip parse2Shell) s . split2F 
 
 split2F :: String -> Parser [Field]
 split2F ifs = (eof >> return [""]) <|> ( choices <$> anyChar <*> (split2F ifs) )
   where choices :: Char -> [Field] -> [Field]
         choices c rest = if c `elem` ifs then 
                              if length (head rest) == 0 then
-                               if length rest == 0 then [""] ++ rest 
+                               if length rest == 1 then [""] ++ rest 
                                else rest
-                             else rest
-                           else [ [c] ++ head rest] ++ tail rest
+                             else [""] ++ rest
+                         else [ [c] ++ head rest] ++ tail rest
 
 getVarExp :: [String] -> Parser String
 getVarExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
 
 getCmdSubExp :: Parser String
-getCmdSubExp = char '(' >> getDollarExp (\_ -> "") (stackPush stackNew ")")
+getCmdSubExp = char '(' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew ")") )
 
 getParamExp :: Parser String
-getParamExp = char '{' >>  getDollarExp (\_ -> "") (stackPush stackNew "}")
+getParamExp = char '{'  >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
 
 escapeUnorigQuotes :: Parser String
 escapeUnorigQuotes = (eof >> return "") <|> do 
@@ -104,8 +110,11 @@ removeQuotes = (eof >> return "")
            <|> (char '\xfe' >> (++) <$> (anyChar >>= return . (['\xfe']++) . (:[]) )    <*> removeQuotes )
            <|> (               (++) <$> (anyChar >>= return . (:[]) )                   <*> removeQuotes )
 
-parse2ShellD :: Parser (Shell a) -> String -> Shell a
-parse2ShellD parser s = (\(Right v) -> v) $ parse parser "stdin" s
+parse2ShellD :: Parser (Shell [Field]) -> String -> Shell [Field]
+parse2ShellD parser s = do
+  case res of (Right v) -> v
+              (Left e)  -> lift $ print e >> return [""]
+  where res = parse parser "stdin" s
 
 parse2Shell :: (Show a) => Parser a -> String -> Shell a
 parse2Shell parser s = let res = parse parser "string" s in do
@@ -137,9 +146,9 @@ expandWord cmdWord = do
 -- how to exploit my shell? on command substitution print to stdout ['\0','\0', 'f'] -> profit
 -- expand split2F to accept [String] aa field seperator
 --  return fs
---  lift $ print fs
+  lift $ print fs
   noQuotes <- parse2Shell removeQuotes ( concat $ L.intersperse ['\xff'] fs)
---  lift $ print noQuotes
+  -- lift $ putStrLn noQuotes
   parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
 --expandWord String -> Shell [Field]
 --expandWord word = foldl1 (\a b -> ppJoinEnds <$> a <*> b ) (parseRes parseExps word)
