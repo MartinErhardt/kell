@@ -24,7 +24,7 @@ data ShellEnv = ShellEnv { var :: Map.Map String String
                                  } deriving(Eq, Show)
 type Shell = StateT ShellEnv IO 
 exec :: String -> Shell (Maybe ProcessStatus)
-exec cmd = expandWord cmd >>= (\fs -> if fs == [] then return . Just $ Exited ExitSuccess
+exec cmd = expandWord cmd >>= (\fs -> if fs == [[]] then return . Just $ Exited ExitSuccess
                                                   else launchCmd (head fs) (tail fs) (return ()) ) -- fold all commandwords and do assignments prior to that
 --exec cmd = let tokens = parse lexer "stdin" cmd in lift $ print tokens
 
@@ -50,8 +50,7 @@ launchCmdSub cmd = do
    -- exitImmediately ExitSuccess
   lift $ (fdToHandle . snd $ pipe) >>= hClose
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
-  lift $ ( (fdToHandle . fst $ pipe) >>=  hGetContents)
-  -- lift $ signalProcess killProcess forkedPId
+  lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
 type Field = String
 getVar :: String -> Shell (Maybe String)
@@ -75,13 +74,8 @@ fieldExpand s = do
 split2F :: String -> Parser [Field]
 split2F ifs = (eof >> return [""]) <|> ( choices <$> anyChar <*> (split2F ifs) )
   where choices :: Char -> [Field] -> [Field]
-        choices c rest = if c `elem` ifs then 
-                             if length (head rest) == 0 then
-                               if length rest == 1 then [""] ++ rest 
-                               else rest
-                             else [""] ++ rest
+        choices c rest = if c `elem` ifs then [""] ++ rest
                          else [ [c] ++ head rest] ++ tail rest
-
 
 escapeUnorigQuotes :: Parser String
 escapeUnorigQuotes = (eof >> return "") <|> do 
@@ -109,7 +103,7 @@ parse2ShellD :: Parser (Shell [Field]) -> String -> Shell [Field]
 parse2ShellD parser s = do
   case res of (Right v) -> v
               (Left e)  -> lift $ print e >> return [""]
-  where res = parse parser "stdin" s
+  where res = parse parser "string" s
 
 parse2Shell :: (Show a) => Parser a -> String -> Shell a
 parse2Shell parser s = let res = parse parser "string" s in do
@@ -124,7 +118,7 @@ parseExps doFExps names = (eof >> (return . return) [""])
         <|> (char '`'  >> bQuote (char '`'  >> return "" ) >>= processBQuote )
         <|> (escape '\\'                                   >>= appendStr2LF )
         <|> (anyChar                                       >>= appendStr2LF . (:[]) )
-  where ppJoinEnds l1 l2 = let newF = last l1 ++ head l2 in init l1 ++ (if newF==[] then [] else [newF]) ++ tail l2
+  where ppJoinEnds l1 l2 = init l1 ++ [last l1 ++ head l2] ++ tail l2
         enclose c = (++[c]) . ([c]++)
         appl1stOrd appl shAction1 shAction2 = appl <$> shAction1 <*> shAction2
         
@@ -153,12 +147,11 @@ expandWord cmdWord = do
 -- how to exploit my shell? on command substitution print to stdout ['\0','\0', 'f'] -> profit
 -- expand split2F to accept [String] aa field seperator
   --lift $ print fs
-  noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ removeEmptyEnds fs)
+  noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ filter (/="") fs)
 --  lift $ putStrLn noQuotes
   res <- parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
---  lift $ print res
+  -- lift $ print res
   return res
-  where removeEmptyEnds = (\fs -> if head fs == [] then tail fs else fs) . (\fs -> if last fs == [] then init fs else fs)
 --expandWord String -> Shell [Field]
 --expandWord word = foldl1 (\a b -> ppJoinEnds <$> a <*> b ) (parseRes parseExps word)
 --  where ppJoinEnds a b = init a ++ [last a ++ head b] ++ tail b

@@ -7,5 +7,5 @@ import System.Posix.Process
 import Text.Parsec
 
 main :: IO ()
-main = getLine >>= (\cmd -> evalStateT (launchCmdSub cmd) getDefaultShellEnv) >>= putStr >> main-- >> exitImmediately ExitSuccess
+main = getLine >>= (\cmd -> evalStateT (exec cmd) getDefaultShellEnv) >> main-- >> exitImmediately ExitSuccess
 ---main = getLine >>= print . parse lexer "stdin" --"stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
