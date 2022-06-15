@@ -24,11 +24,12 @@ data ShellEnv = ShellEnv { var :: Map.Map String String
                                  } deriving(Eq, Show)
 type Shell = StateT ShellEnv IO 
 exec :: String -> Shell (Maybe ProcessStatus)
-exec cmd = expandWord cmd >>= (\fs -> launchCmd (head fs) (tail fs) (return ()) ) -- fold all commandwords and do assignments prior to that
+exec cmd = expandWord cmd >>= (\fs -> if fs == [] then return . Just $ Exited ExitSuccess
+                                                  else launchCmd (head fs) (tail fs) (return ()) ) -- fold all commandwords and do assignments prior to that
 --exec cmd = let tokens = parse lexer "stdin" cmd in lift $ print tokens
 
 getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv $ Map.fromList [("var1","hello guys"),("var2","echo \"$var1\""), ("var3", "/home/martin/HestonExotics/hexo -t rng")]
+getDefaultShellEnv = ShellEnv $ Map.fromList [("var1","echo ls"),("var2","echo \"$var1\""), ("var3", "/home/martin/HestonExotics/hexo -t rng")]
 
 launchCmd :: FilePath -> [String] -> IO () -> Shell (Maybe ProcessStatus)
 launchCmd cmd args redirects = do
@@ -65,9 +66,9 @@ expandParams name = do
 fieldExpand :: String -> Shell [Field]
 fieldExpand s = do
   ifs <- expandParams "IFS"
-  lift $ print ifs
+  -- lift $ print ifs
   res <- (flip parse2Shell) s $ split2F ifs
-  lift $ print res
+--  lift $ print res
   return res
 --fieldExpand s = expandParams "IFS" >>= (flip parse2Shell) s . split2F 
 
@@ -81,14 +82,6 @@ split2F ifs = (eof >> return [""]) <|> ( choices <$> anyChar <*> (split2F ifs) )
                              else [""] ++ rest
                          else [ [c] ++ head rest] ++ tail rest
 
-getVarExp :: [String] -> Parser String
-getVarExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
-
-getCmdSubExp :: Parser String
-getCmdSubExp = char '(' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew ")") )
-
-getParamExp :: Parser String
-getParamExp = char '{'  >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
 
 escapeUnorigQuotes :: Parser String
 escapeUnorigQuotes = (eof >> return "") <|> do 
@@ -125,23 +118,32 @@ parse2Shell parser s = let res = parse parser "string" s in do
 
 parseExps :: Bool -> [String] -> Parser (Shell [Field])
 parseExps doFExps names = (eof >> (return . return) [""])
-        <|> (char '$'  >> expDetected fExpAction            >>= processExp ) -- TODO quoted expansions
-        <|> (char '\'' >> quote  (char '\'' >> return "'" ) >>= appendStr2LF  . ("'" ++ ) )
-        <|> (char '"'  >> dQuote (char '"'  >> return "")   >>= processDQuote )
-        <|> (escape '\\'                                    >>= appendStr2LF )
-        <|> (anyChar                                        >>= appendStr2LF . (:[]) )
-  where expDetected exp = (getVarExp names >>= return . (\s -> return s >>= expandParams  >>= parse2Shell escapeUnorigQuotes >>= exp) )
-                      <|> (getParamExp     >>= return . (\s -> return s >>= expandParams  >>= parse2Shell escapeUnorigQuotes >>= exp) )
-                      <|> (getCmdSubExp    >>= return . (\s -> return s >>= launchCmdSub  >>= parse2Shell escapeUnorigQuotes >>= exp) )
-        
-        ppJoinEnds l1 l2 = init l1 ++ [last l1 ++ head l2] ++ tail l2
+        <|> (char '$'  >> dExpDetected                     >>= processFExp ) -- TODO quoted expansions
+        <|> (char '\'' >> quote  (char '\'' >> return "" ) >>= appendStr2LF  . enclose '\'') 
+        <|> (char '"'  >> dQuote (char '"'  >> return "" ) >>= processDQuote )
+        <|> (char '`'  >> bQuote (char '`'  >> return "" ) >>= processBQuote )
+        <|> (escape '\\'                                   >>= appendStr2LF )
+        <|> (anyChar                                       >>= appendStr2LF . (:[]) )
+  where ppJoinEnds l1 l2 = let newF = last l1 ++ head l2 in init l1 ++ (if newF==[] then [] else [newF]) ++ tail l2
+        enclose c = (++[c]) . ([c]++)
         appl1stOrd appl shAction1 shAction2 = appl <$> shAction1 <*> shAction2
         
-        appendStr2LF str  = (\action -> ppJoinEnds [str] <$> action)          <$> (parseExps doFExps names)
-        processExp action = (appl1stOrd ppJoinEnds action)                    <$> (parseExps doFExps names)
-        processDQuote str = processExp $ ((:[]) . (++"\"") . ("\""++) . head) <$> (parse2ShellD (parseExps False names) str )
+        bQuote = quoteEsc ( (++) <$> (char '\\' >> (((char '\\' <|> char '$' <|> char '`') >> anyChar >>= return . (:[]) ) 
+                                               <|> (anyChar >>= return . (['\\']++) . (:[]) ) ) ) )
+        getVarExp :: [String] -> Parser String
+        getVarExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
+        getCmdSubExp = char '(' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew ")") )
+        getParamExp  = char '{' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
         
-        fExpAction = if doFExps then fieldExpand else return . (:[])
+        appendStr2LF str  = (\action -> ppJoinEnds [str] <$> action)   <$> (parseExps doFExps names)
+        processFExp action = (appl1stOrd ppJoinEnds action)            <$> (parseExps doFExps names)
+        processDQuote str = processFExp $ ((:[]) . enclose '"' . head) <$> (parse2ShellD (parseExps False names) str )
+        processPost str = (parse2Shell escapeUnorigQuotes str >>= if doFExps then fieldExpand else return . (:[]) )
+        processBQuote :: String -> Parser (Shell [Field])
+        processBQuote s =                    return   (      return s >>= launchCmdSub >>= processPost)
+        dExpDetected = (getVarExp names  >>= return . (\s -> return s >>= expandParams >>= processPost) )
+                   <|> (getParamExp      >>= return . (\s -> return s >>= expandParams >>= processPost) )
+                   <|> (getCmdSubExp     >>= return . (\s -> return s >>= launchCmdSub >>= processPost) )
 
 expandWord :: String -> Shell [Field]
 expandWord cmdWord = do
@@ -150,13 +152,13 @@ expandWord cmdWord = do
 -- TODO expandedPNFields <- Pathname expansion
 -- how to exploit my shell? on command substitution print to stdout ['\0','\0', 'f'] -> profit
 -- expand split2F to accept [String] aa field seperator
---  return fs
   --lift $ print fs
-  noQuotes <- parse2Shell removeQuotes ( concat $ L.intersperse ['\xff'] fs)
+  noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ removeEmptyEnds fs)
 --  lift $ putStrLn noQuotes
   res <- parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
-  lift $ print res
+--  lift $ print res
   return res
+  where removeEmptyEnds = (\fs -> if head fs == [] then tail fs else fs) . (\fs -> if last fs == [] then init fs else fs)
 --expandWord String -> Shell [Field]
 --expandWord word = foldl1 (\a b -> ppJoinEnds <$> a <*> b ) (parseRes parseExps word)
 --  where ppJoinEnds a b = init a ++ [last a ++ head b] ++ tail b

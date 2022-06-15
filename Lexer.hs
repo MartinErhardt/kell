@@ -108,6 +108,7 @@ parseWord = let eofA = (eof >> return [Word ""])
             <|> (char '\n'       >>  delimit [NEWLINE] )
             <|> (             escape '\\'                      >>= appendStr )  -- parse quotes
             <|> (char '\'' >> quote (char '\''>> return "'" )  >>= appendStr . ("'"++) )
+            <|> (char '`'  >> quote (char '`' >> return "`" )  >>= appendStr . ("`"++) )
             <|> (char '"'  >> dQuote (char '"' >> return "\"") >>= appendStr . ("\""++) )       -- TODO <|> wordExpansion
             <|> (getDollarExp id stackNew                      >>= appendStr )                    -- word expansion
             <|> (anyChar                                       >>= appendStr .  (:[])  )          -- parse letter
