@@ -54,16 +54,16 @@ data Token = Word String
   deriving (Show, Eq)
 
 reservedOps :: [(String,Token)]
-reservedOps=[("&&",    AND_IF)
-            ,("||",    OR_IF)
-            ,(";;",    DSEMI)
-            ,("<<-",   DLESSDASH)
-            ,("<<",    DLESS)
-            ,(">>",    DGREAT)
-            ,("<&",    LESSAND)
-            ,(">&",    GREATAND)
-            ,("<>",    LESSGREAT)
-            ,(">|",    CLOBBER)
+reservedOps = [("&&",    AND_IF)
+              ,("||",    OR_IF)
+              ,(";;",    DSEMI)
+              ,("<<-",   DLESSDASH)
+              ,("<<",    DLESS)
+              ,(">>",    DGREAT)
+              ,("<&",    LESSAND)
+              ,(">&",    GREATAND)
+              ,("<>",    LESSGREAT)
+              ,(">|",    CLOBBER)
                     --,("if",    If)
                     --,("then",  Then)
                     --,("else",  Else)
@@ -76,14 +76,14 @@ reservedOps=[("&&",    AND_IF)
                     --,("while", While)
                     --,("until", Until)
                     --,("for",   For)
-            ,("(",     LBracket)
-            ,(")",     RBracket)
-            ,("&",     Ampersand)
-            ,(";",     SEMI)
-            ,("|",     PIPE)
-            ,("<",     LESS)
-            ,(">",     GREAT)
-            ,("\n",    NEWLINE)]
+              ,("(",     LBracket)
+              ,(")",     RBracket)
+              ,("&",     Ampersand)
+              ,(";",     SEMI)
+              ,("|",     PIPE)
+              ,("<",     LESS)
+              ,(">",     GREAT)
+              ,("\n",    NEWLINE)]
 
 parseReservedOp :: Parser Token
 parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> reservedOps) 
@@ -127,7 +127,7 @@ parseWord = (eof       >>            return "" )
         <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" )      <*> (parseWord <|> return "") ) )
         <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"")      <*> (parseWord <|> return "") ) )
         <|> (              (++)            <$> getDollarExp id stackNew               <*> (parseWord <|> return "") ) -- word expansion
-        <|> (             ((++) . (:[]))   <$> noneOf ((head . fst) <$> reservedOps)  <*> (parseWord <|> return ""))-- parse letter
+        <|> (             ((++) . (:[]))   <$> noneOf ((head . fst) <$> reservedOps)  <*> (parseWord <|> return "") )-- parse letter
 
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])

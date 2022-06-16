@@ -57,15 +57,14 @@ getVar :: String -> Shell (Maybe String)
 getVar name = get >>= (\s -> return $ Map.lookup name (var s))
 
 expandParams :: String -> Shell String
-expandParams name = do
-  var <- getVar name
-  return $ case var of (Just val) -> val -- set and not null
-                       (Nothing)  -> ""  -- unset
+expandParams name = getVar name >>= return . handleVal
+  where handleVal var =  case var of (Just val) -> val -- set and not null
+                                     (Nothing)  -> ""  -- unset
 
 fieldExpand :: String -> Shell [Field]
-fieldExpand s = getVar "IFS" >>= ifsHandler >>= (flip parse2Shell) s . split2F 
-  where ifsHandler var = case var of (Just val) -> return val
-                                     (Nothing)  -> return " \t\n"
+fieldExpand s = getVar "IFS" >>= return . ifsHandler >>= (flip parse2Shell) s . split2F 
+  where ifsHandler var = case var of (Just val) -> val
+                                     (Nothing)  -> " \t\n"
 
 split2F :: String -> Parser [Field]
 split2F ifs = (eof >> return [""])
@@ -73,9 +72,8 @@ split2F ifs = (eof >> return [""])
           <|> (                                  oneOf ifs >> ([""]++) <$> split2F ifs )
 
 escapeUnorigQuotes :: Parser String
-escapeUnorigQuotes = (eof >> return "") <|> do 
-  c <- anyChar
-  escapeUnorigQuotes >>= ( return . ( (if c `elem` "\xfe\xff\"'\\" then ['\xfe',c] else [c]) ++)  )
+escapeUnorigQuotes = (eof >> return "") <|> handle <$> anyChar <*> escapeUnorigQuotes
+  where handle c str =  (if c `elem` "\xfe\xff\"'\\" then ['\xfe',c] else [c]) ++ str
 
 removeEscReSplit :: Parser [Field]
 removeEscReSplit = (eof >> return [""])
@@ -95,15 +93,11 @@ removeQuotes = (eof >> return "")
         dQuoteRecCond = escapes <|> ((++) <$> getDollarExp id stackNew)
 
 parse2ShellD :: Parser (Shell [Field]) -> String -> Shell [Field]
-parse2ShellD parser s = do
-  case res of (Right v) -> v
-              (Left e)  -> lift $ print e >> return [""]
-  where res = parse parser "string" s
+parse2ShellD parser s = case parse parser "string" s of (Right v) -> v
+                                                        (Left e)  -> lift $ print e >> return [""]
 
 parse2Shell :: (Show a) => Parser a -> String -> Shell a
-parse2Shell parser s = let res = parse parser "string" s in do
---  lift $ print res
-  (return . (\(Right v) -> v)) res
+parse2Shell parser = return . (\(Right v) -> v) . parse parser "string"
 
 parseExps :: Bool -> [String] -> Parser (Shell [Field])
 parseExps doFExps names = (eof >> (return . return) [""])
