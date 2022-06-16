@@ -8,6 +8,6 @@ import Text.Parsec
 import Data.Text
 import TokParser
 main :: IO ()
---main = getLine >>= (flip evalStateT getDefaultShellEnv) . exec . unpack . replace (pack "\\\n") (pack "") . pack >> main-- >> exitImmediately ExitSuccess
-main = getLine >>= print . parse lexer "stdin" --"stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
+main = getLine >>= (flip evalStateT getDefaultShellEnv) . exec . unpack . replace (pack "\\\n") (pack "") . pack >> main-- >> exitImmediately ExitSuccess
+--main = getLine >>= print . parse lexer "stdin" --"stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
 -- . parse parseToks "tokenstream" . (\(Right w)-> w) . 

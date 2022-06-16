@@ -60,22 +60,17 @@ expandParams :: String -> Shell String
 expandParams name = do
   var <- getVar name
   return $ case var of (Just val) -> val -- set and not null
-                       (Nothing)        -> " \t\n"  -- unset
+                       (Nothing)  -> ""  -- unset
 
 fieldExpand :: String -> Shell [Field]
-fieldExpand s = do
-  ifs <- expandParams "IFS"
-  -- lift $ print ifs
-  res <- (flip parse2Shell) s $ split2F ifs
---  lift $ print res
-  return res
---fieldExpand s = expandParams "IFS" >>= (flip parse2Shell) s . split2F 
+fieldExpand s = getVar "IFS" >>= ifsHandler >>= (flip parse2Shell) s . split2F 
+  where ifsHandler var = case var of (Just val) -> return val
+                                     (Nothing)  -> return " \t\n"
 
 split2F :: String -> Parser [Field]
-split2F ifs = (eof >> return [""]) <|> ( choices <$> anyChar <*> (split2F ifs) )
-  where choices :: Char -> [Field] -> [Field]
-        choices c rest = if c `elem` ifs then [""] ++ rest
-                         else [ [c] ++ head rest] ++ tail rest
+split2F ifs = (eof >> return [""])
+          <|> ( (\c fs -> [ [c] ++ head fs] ++ tail fs) <$> noneOf ifs <*> split2F ifs )
+          <|> (                                  oneOf ifs >> ([""]++) <$> split2F ifs )
 
 escapeUnorigQuotes :: Parser String
 escapeUnorigQuotes = (eof >> return "") <|> do 

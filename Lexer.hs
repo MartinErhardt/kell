@@ -52,6 +52,8 @@ data Token = Word String
   | Bang     -- !
   | In       -- in
   deriving (Show, Eq)
+
+reservedOps :: [(String,Token)]
 reservedOps=[("&&",    AND_IF)
             ,("||",    OR_IF)
             ,(";;",    DSEMI)
@@ -82,7 +84,6 @@ reservedOps=[("&&",    AND_IF)
             ,("<",     LESS)
             ,(">",     GREAT)
             ,("\n",    NEWLINE)]
-
 
 parseReservedOp :: Parser Token
 parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> reservedOps) 
@@ -130,7 +131,7 @@ parseWord = (eof       >>            return "" )
 
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])
-    <|> (          ( (++) . (:[]) )       <$> parseReservedOp <*>                         lexer)
-    <|> (char '#' >> comment                                                           >> lexer)
-    <|> (char ' '                                                                      >> lexer)
-    <|> (          ( (++) . (:[]) . Word) <$> parseWord       <*> ((eof >> return []) <|> lexer) )
+    <|> ( ( (++) . (:[]) )       <$> parseReservedOp <*>                         lexer)
+    <|> (char '#' >> comment                                                  >> lexer)
+    <|> (char ' '                                                             >> lexer)
+    <|> ( ( (++) . (:[]) . Word) <$> parseWord       <*> ((eof >> return []) <|> lexer) )
