@@ -4,7 +4,8 @@ module Lexer
   quoteEsc,
   quote,
   dQuote,
-  escape
+  escape,
+  Token(..),
 ) where
 import Text.Parsec
 -- TODO No proper wchar support
@@ -42,6 +43,14 @@ data Token = Word String
   | PIPE
   | NEWLINE
   | EOF
+  -- not sure if conformant
+  | LESS
+  | GREAT
+  -- reserved words
+  | Lbrace   -- {
+  | Rbrace   -- }
+  | Bang     -- !
+  | In       -- in
   deriving (Show, Eq)
 
 parseReservedOp :: Parser Token
@@ -71,7 +80,9 @@ parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> re
                     ,("(",     LBracket)
                     ,(")",     RBracket)
                     ,(";",     SEMI)
-                    ,("|",     PIPE)]
+                    ,("|",     PIPE)
+                    ,("<",     LESS)
+                    ,(">",     GREAT)]
 
 escape :: Char -> Parser String
 escape identifier = char identifier >> ([identifier]++) .(:[]) <$> anyChar
@@ -107,8 +118,8 @@ parseWord = let eofA = (eof >> return [Word ""])
             <|> (char ' '        >>  delimit []      )                                                 -- NOTE: delimiter will be removed later 
             <|> (char '\n'       >>  delimit [NEWLINE] )
             <|> (             escape '\\'                      >>= appendStr )  -- parse quotes
-            <|> (char '\'' >> quote (char '\''>> return "'" )  >>= appendStr . ("'"++) )
-            <|> (char '`'  >> quote (char '`' >> return "`" )  >>= appendStr . ("`"++) )
+            <|> (char '\'' >> quote  (char '\''>> return "'" ) >>= appendStr . ("'"++) )
+            <|> (char '`'  >> quote  (char '`' >> return "`" ) >>= appendStr . ("`"++) )
             <|> (char '"'  >> dQuote (char '"' >> return "\"") >>= appendStr . ("\""++) )       -- TODO <|> wordExpansion
             <|> (getDollarExp id stackNew                      >>= appendStr )                    -- word expansion
             <|> (anyChar                                       >>= appendStr .  (:[])  )          -- parse letter
