@@ -43,7 +43,7 @@ data Token = Word String
   | PIPE
   | NEWLINE
   | EOF
-  -- not sure if conformant
+  -- not sure if conforming
   | LESS
   | GREAT
   -- reserved words
@@ -52,45 +52,48 @@ data Token = Word String
   | Bang     -- !
   | In       -- in
   deriving (Show, Eq)
+reservedOps=[("&&",    AND_IF)
+            ,("||",    OR_IF)
+            ,(";;",    DSEMI)
+            ,("<<-",   DLESSDASH)
+            ,("<<",    DLESS)
+            ,(">>",    DGREAT)
+            ,("<&",    LESSAND)
+            ,(">&",    GREATAND)
+            ,("<>",    LESSGREAT)
+            ,(">|",    CLOBBER)
+                    --,("if",    If)
+                    --,("then",  Then)
+                    --,("else",  Else)
+                    --,("elif",  Elif)
+                    --,("fi",    Fi)
+                    --,("done",  Done)
+                    --,("do",    Do)
+                    --,("case",  Case)
+                    --,("esac",  Esac)
+                    --,("while", While)
+                    --,("until", Until)
+                    --,("for",   For)
+            ,("(",     LBracket)
+            ,(")",     RBracket)
+            ,("&",     Ampersand)
+            ,(";",     SEMI)
+            ,("|",     PIPE)
+            ,("<",     LESS)
+            ,(">",     GREAT)
+            ,("\n",    NEWLINE)]
+
 
 parseReservedOp :: Parser Token
 parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> reservedOps) 
-  where reservedOps=[("&&",    AND_IF)
-                    ,("||",    OR_IF)
-                    ,(";;",    DSEMI)
-                    ,("<<",    DLESS)
-                    ,(">>",    DGREAT)
-                    ,("<&",    LESSAND)
-                    ,(">&",    GREATAND)
-                    ,("<>",    LESSGREAT)
-                    ,("<<-",   DLESSDASH)
-                    ,(">|",    CLOBBER)
-                    ,("if",    If)
-                    ,("then",  Then)
-                    ,("else",  Else)
-                    ,("elif",  Elif)
-                    ,("fi",    Fi)
-                    ,("done",  Done)
-                    ,("do",    Do)
-                    ,("case",  Case)
-                    ,("esac",  Esac)
-                    ,("while", While)
-                    ,("until", Until)
-                    ,("for",   For)
-                    ,("(",     LBracket)
-                    ,(")",     RBracket)
-                    ,(";",     SEMI)
-                    ,("|",     PIPE)
-                    ,("<",     LESS)
-                    ,(">",     GREAT)]
 
 escape :: Char -> Parser String
 escape identifier = char identifier >> ([identifier]++) .(:[]) <$> anyChar
 
 quoteEsc :: Parser (String -> String) -> Parser String -> Parser String
-quoteEsc recCondition endCondition = (eof >> unexpected("mising quote end") )  <|> endCondition
-                                 <|> (recCondition              <*> (quoteEsc recCondition endCondition) )
-                                 <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc recCondition endCondition) )
+quoteEsc recCondition endCondition = endCondition
+                                <|> (recCondition              <*> (quoteEsc recCondition endCondition) )
+                                <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc recCondition endCondition) )
 
 quote :: Parser String -> Parser String
 quote = quoteEsc $ (++) <$> escape '\\' -- TODO catch and specify parse error with <?>
@@ -108,27 +111,26 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
         stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (getDollarExp f a) >>= return . (str++)
-        stackHandler (str, Nothing) = unexpected("unexpected " ++ str)
+        stackHandler (str, Nothing) = unexpected(str)
 
-parseWord :: Parser [Token]
-parseWord = let eofA = (eof >> return [Word ""])
-                appendStr s = parseWord >>= (\((Word r):o) -> return $ [Word $ s ++ r] ++ o)
-                delimit delimiters = ( (([Word ""] ++ delimiters) ++) <$> lexer) in eofA
-            <|> (parseReservedOp >>= delimit . (:[]) ) 
-            <|> (char ' '        >>  delimit []      )                                                 -- NOTE: delimiter will be removed later 
-            <|> (char '\n'       >>  delimit [NEWLINE] )
-            <|> (             escape '\\'                      >>= appendStr )  -- parse quotes
-            <|> (char '\'' >> quote  (char '\''>> return "'" ) >>= appendStr . ("'"++) )
-            <|> (char '`'  >> quote  (char '`' >> return "`" ) >>= appendStr . ("`"++) )
-            <|> (char '"'  >> dQuote (char '"' >> return "\"") >>= appendStr . ("\""++) )       -- TODO <|> wordExpansion
-            <|> (getDollarExp id stackNew                      >>= appendStr )                    -- word expansion
-            <|> (anyChar                                       >>= appendStr .  (:[])  )          -- parse letter
+comment :: Parser String
+comment = (anyChar >>= handler) <|> return ""
+  where handler c = case c of '\n' -> unexpected [c]
+                              _    -> (++[c]) <$> comment
+
+parseWord :: Parser String
+parseWord = (eof       >>            return "" )
+        <|> (char '#'  >> comment >> return "" )
+        <|> (              (++)            <$> escape '\\'                            <*> (parseWord <|> return "") )
+        <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" )      <*> (parseWord <|> return "") ) )
+        <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" )      <*> (parseWord <|> return "") ) )
+        <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"")      <*> (parseWord <|> return "") ) )
+        <|> (              (++)            <$> getDollarExp id stackNew               <*> (parseWord <|> return "") ) -- word expansion
+        <|> (             ((++) . (:[]))   <$> noneOf ((head . fst) <$> reservedOps)  <*> (parseWord <|> return ""))-- parse letter
 
 lexer :: Parser [Token]
-lexer = let eofA = (eof>> return [EOF])
-            comment = (eofA <|> (char '\n' >> (([NEWLINE]++) <$> lexer )) <|> (anyChar >> comment)) in eofA
-        <|> (           ( (++) . (:[]) ) <$> parseReservedOp <*> lexer )
-        <|> (char '\n'       >>               (([NEWLINE]++) <$> lexer ) )
-        <|> (char '#'        >> comment)
-        <|> (char ' '        >> lexer) <|> parseWord
-
+lexer = (eof      >> return [EOF])
+    <|> (          ( (++) . (:[]) )       <$> parseReservedOp <*>                         lexer)
+    <|> (char '#' >> comment                                                           >> lexer)
+    <|> (char ' '                                                                      >> lexer)
+    <|> (          ( (++) . (:[]) . Word) <$> parseWord       <*> ((eof >> return []) <|> lexer) )

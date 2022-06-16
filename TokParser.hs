@@ -90,7 +90,7 @@ parseSmpCmd = addRedirect <$> parseIORedirect <*> (parseSmpCmd <|> base)
         addWord str cmd =       SmpCmd (redirects cmd)            (assign cmd)             ([str] ++ cmdWords cmd)
         parseSmpCmdSuf = addRedirect <$> parseIORedirect <*> parseSmpCmdSuf 
                      <|> addWord     <$> getWord         <*> parseSmpCmdSuf
-		     <|> base
+                     <|> base
 
 parseToks :: TokParser SmpCmd
 parseToks = parseSmpCmd >>= (\smpCmd -> (eof <|> op EOF) >> return smpCmd)
