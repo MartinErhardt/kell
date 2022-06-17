@@ -92,7 +92,7 @@ escape :: Char -> Parser String
 escape identifier = char identifier >> ([identifier]++) .(:[]) <$> anyChar
 
 quoteEsc :: Parser (String -> String) -> Parser String -> Parser String
-quoteEsc recCondition endCondition = endCondition
+quoteEsc recCondition endCondition = endCondition <|> (eof >> unexpected("eof") )
                                 <|> (recCondition              <*> (quoteEsc recCondition endCondition) )
                                 <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc recCondition endCondition) )
 
@@ -111,8 +111,8 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = try $ string str >> if stackIsEmpty a then return $ f str else quote (getDollarExp f a) >>= return . (str++)
-        stackHandler (str, Nothing) = unexpected(str)
+        stackHandler (str, (Just a)) = (try $ string str) >> if stackIsEmpty a then return $ f str else quote (getDollarExp f a) >>= return . (str++)
+        stackHandler (str, Nothing) = fail ""
 
 comment :: Parser String
 comment = (anyChar >>= handler) <|> return ""
@@ -122,12 +122,13 @@ comment = (anyChar >>= handler) <|> return ""
 parseWord :: Parser String
 parseWord = (eof       >>            return "" )
         <|> (char '#'  >> comment >> return "" )
-        <|> (              (++)            <$> escape '\\'                            <*> (parseWord <|> return "") )
-        <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" )      <*> (parseWord <|> return "") ) )
-        <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" )      <*> (parseWord <|> return "") ) )
-        <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"")      <*> (parseWord <|> return "") ) )
-        <|> (              (++)            <$> getDollarExp id stackNew               <*> (parseWord <|> return "") ) -- word expansion
-        <|> (             ((++) . (:[]))   <$> noneOf ((head . fst) <$> reservedOps)  <*> (parseWord <|> return "") )-- parse letter
+        <|> (              (++)            <$> escape '\\'                       <*> (parseWord <|> return "") )
+        <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" ) <*> (parseWord <|> return "") ) )
+        <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" ) <*> (parseWord <|> return "") ) )
+        <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"") <*> (parseWord <|> return "") ) )
+        <|> (              (++)            <$> getDollarExp id stackNew          <*> (parseWord <|> return "") ) -- word expansion
+        <|> (             ((++) . (:[]))   <$> noneOf forbidden                  <*> (parseWord <|> return "") )-- parse letter
+  where forbidden = ((head . fst) <$> reservedOps) ++ " "
 
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])

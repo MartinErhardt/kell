@@ -1,6 +1,8 @@
 module TokParser
 (
-  parseToks
+  parseToks,
+  SmpCmd,
+  cmdWords
 ) where
 import qualified Text.Read as Rd
 import Text.Parsec
@@ -12,6 +14,7 @@ import Lexer (Token (..))
 import System.IO
 import Data.Maybe
 import qualified Data.Map as Map
+
 data Redirect = Redirect Token Int String deriving (Eq,Show)
 data SmpCmd = SmpCmd { redirects ::  [Redirect]
                      , assign :: [(String,String)]

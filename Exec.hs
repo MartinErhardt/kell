@@ -1,12 +1,15 @@
 module Exec
 (
- exec,
- launchCmdSub,
- getDefaultShellEnv
+ runSmpCmd,
+ getDefaultShellEnv,
+ expandWord,
+ Shell
 ) where
+import Lexer
+import TokParser (SmpCmd(..),parseToks)
+
 import Text.Parsec
 import Text.Parsec.String
-import Lexer
 import qualified Data.Map as Map
 import Data.Stack
 import qualified Data.List as L
@@ -22,21 +25,32 @@ import System.Environment
 data ShellEnv = ShellEnv { var :: Map.Map String String
                                 -- , func :: Map.Map String String
                                  } deriving(Eq, Show)
-type Shell = StateT ShellEnv IO 
-exec :: String -> Shell (Maybe ProcessStatus)
-exec cmd = expandWord cmd >>= (\fs -> if fs == [[]] then return . Just $ Exited ExitSuccess
-                                                  else launchCmd (head fs) (tail fs) (return ()) ) -- fold all commandwords and do assignments prior to that
---exec cmd = let tokens = parse lexer "stdin" cmd in lift $ print tokens
+type Shell = StateT ShellEnv IO
+
+runSmpCmd :: SmpCmd -> Shell (Maybe ProcessStatus)
+runSmpCmd cmd = do
+  -- lift . print $ cmdWords cmd
+  allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord <$> cmdWords cmd)
+  -- lift $ print allFields
+  if allFields == [] then return . Just $ Exited ExitSuccess
+  else launchCmd (head allFields) (tail allFields) (return ())
 
 getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv $ Map.fromList [("var1","echo ls"),("var2","echo \"$var1\""), ("var3", "/home/martin/HestonExotics/hexo -t rng")]
+getDefaultShellEnv = ShellEnv $ Map.fromList [("PS1","$ "), ("PS2","> ")]
 
 launchCmd :: FilePath -> [String] -> IO () -> Shell (Maybe ProcessStatus)
 launchCmd cmd args redirects = do
   forkedPId <- lift . forkProcess $ do
-    redirects
+    -- redirects
     getEnvironment >>= (\env -> executeFile cmd True args (Just env) )
-  lift $ getProcessStatus False False forkedPId
+  lift $ getProcessStatus True True forkedPId
+
+execSubShell :: String -> Shell ()
+execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()
+                                                                     (Left err)  -> lift $ print err
+                                (Left err)  -> lift $ print err
+  where toks = parse lexer "subshell" cmd
+        parse2Ast = parse parseToks "tokenstreamsubshell"
 
 launchCmdSub :: String -> Shell String
 launchCmdSub cmd = do
@@ -45,7 +59,7 @@ launchCmdSub cmd = do
   forkedPId <- lift . forkProcess $ do
     (fdToHandle . fst $ pipe) >>= hClose
     dupTo (snd pipe) stdOutput
-    evalStateT (exec cmd) curEnv
+    evalStateT (execSubShell cmd) curEnv
     return ()
    -- exitImmediately ExitSuccess
   lift $ (fdToHandle . snd $ pipe) >>= hClose
@@ -135,11 +149,11 @@ expandWord cmdWord = do
 -- TODO expandedPNFields <- Pathname expansion
 -- how to exploit my shell? on command substitution print to stdout ['\0','\0', 'f'] -> profit
 -- expand split2F to accept [String] aa field seperator
-  --lift $ print fs
+--  lift $ print fs
   noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ filter (/="") fs)
 --  lift $ putStrLn noQuotes
   res <- parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
-  -- lift $ print res
+--  lift $ print res
   return res
 --expandWord String -> Shell [Field]
 --expandWord word = foldl1 (\a b -> ppJoinEnds <$> a <*> b ) (parseRes parseExps word)
