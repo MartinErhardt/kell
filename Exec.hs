@@ -1,5 +1,3 @@
-    {-# LANGUAGE ForeignFunctionInterface #-}
-    {-# LANGUAGE CApiFFI #-}
 module Exec
 (
  runSmpCmd,
@@ -20,32 +18,20 @@ import qualified Text.Read as Rd
 import Control.Monad.Trans.State.Lazy
 import System.Posix.Process
 import System.Posix.IO
+import System.Posix.IO(OpenFileFlags(..))
 import System.IO
 import System.Exit
 import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
 import Data.Bits
-import System.Posix.Types(Fd(..))
-import Foreign.C
-import Foreign.C.String
-import Foreign.C.Types(CInt(..), CUInt)
+import System.Posix.Types(Fd(..),FileMode)
 import Data.Int(Int32(..))
-
-foreign import capi "openat" c_openat  :: CInt -> CString -> CInt -> CUInt -> IO CInt
-foreign import capi "fcntl.h value O_CREAT"  c_O_CREAT  :: CInt
-foreign import capi "fcntl.h value O_TRUNC"  c_O_TRUNC  :: CInt
-foreign import capi "fcntl.h value O_RDONLY" c_O_RDONLY :: CInt
-foreign import capi "fcntl.h value O_WRONLY" c_O_WRONLY :: CInt
-foreign import capi "fcntl.h value O_RDWR"   c_O_RDWR   :: CInt
-foreign import capi "fcntl.h value O_APPEND" c_O_APPEND :: CInt
-foreign import capi "fcntl.h value S_IRWXU"   c_S_IRWXU  :: CUInt
---foreign import capi "fcntl.h value S_I"  c_S_I  :: CUInt
-foreign import capi "errno.h value errno"    c_errno    :: CUInt
+import System.Posix.Files
 
 data ShellEnv = ShellEnv { var :: Map.Map String String
                       -- , func :: Map.Map String String
-                         , fileMode :: CUInt
+                         , shFMode :: FileMode
                          } deriving(Eq, Show)
 type Shell = StateT ShellEnv IO
 
@@ -60,7 +46,7 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         execLocal = execAssigns >> execRedirects >> (return . Just $ Exited ExitSuccess)
 
 getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv (Map.fromList [("PS1","$ "), ("PS2","> ")]) c_S_IRWXU
+getDefaultShellEnv = ShellEnv (Map.fromList [("PS1","$ "), ("PS2","> ")]) ownerModes
 
 execSubShell :: String -> Shell ()
 execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()
@@ -93,18 +79,15 @@ doAssign :: (String,String) -> Shell ()
 doAssign (name,word) = expandNoSplit word >>= putVar name
 
 doRedirect :: Redirect -> Shell ()
-doRedirect (Redirect tok fd path) = get >>= lift . (getAction tok fd path) . fileMode >>= return . return ()
-  where hsOpenAt :: CInt -> Int -> String -> CUInt -> IO (Fd)
-        hsOpenAt flags fd path mode = do
-	  -- closeFd . Fd $ fromIntegral fd
-          cPath <- newCString path
-          c_openat (fromIntegral fd) cPath flags mode >>= print >> (return . Fd . fromIntegral $ 0)
-        redirAction = [(LESS,      hsOpenAt $ c_O_CREAT .|. c_O_TRUNC  .|. c_O_RDONLY)
-                      ,(GREAT,     hsOpenAt $ c_O_CREAT .|. c_O_TRUNC  .|. c_O_WRONLY)
-                      ,(DGREAT,    hsOpenAt $ c_O_CREAT .|. c_O_APPEND .|. c_O_WRONLY)
-                      ,(LESSGREAT, hsOpenAt $ c_O_CREAT .|. c_O_RDWR)
-                      ,(LESSAND,   (\fd1 fd2 m -> dupTo (Fd $ fromIntegral fd1) (Fd . fromIntegral $ Rd.read fd2) ) )
-                      ,(GREATAND,  (\fd1 fd2 m -> dupTo (Fd $ fromIntegral fd1) (Fd . fromIntegral $ Rd.read fd2) ) )]
+doRedirect (Redirect tok fd path) = get >>= lift . (getAction tok (Fd $ fromIntegral fd) path) . shFMode >>= return . return ()
+  where truncOFlag  = (OpenFileFlags False False False False True)
+        appendOFlag = (OpenFileFlags True  False False False False)
+        redirAction = [(LESS,      (\fd path m -> openFd path ReadOnly  (Just m) truncOFlag  >>= (flip dupTo $ fd)))
+                      ,(GREAT,     (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= (flip dupTo $ fd)))
+                      ,(DGREAT,    (\fd path m -> openFd path WriteOnly (Just m) appendOFlag >>= (flip dupTo $ fd)))
+                      ,(LESSGREAT, (\fd path m -> openFd path ReadWrite (Just m) truncOFlag  >>= (flip dupTo $ fd)))
+                      ,(LESSAND,   (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) ) )
+                      ,(GREATAND,  (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) ) )]
         getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents
 
 getVar :: String -> Shell (Maybe String)
@@ -112,7 +95,7 @@ getVar name =     get >>= return . (Map.lookup name) . var
 
 putVar :: String -> String -> Shell ()
 putVar name val = get >>= return . changeNamespace ( (Map.insert name val) . var) >>= put
-  where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (fileMode curEnv)
+  where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (shFMode curEnv)
 -----------------------------------------------Word Expansion--------------------------------------------------------------
 type Field = String
 
