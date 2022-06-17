@@ -1,3 +1,4 @@
+--   Copyright 2022 Martin Erhardt
 module TokParser
 (
   parseToks,

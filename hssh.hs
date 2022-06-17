@@ -1,3 +1,4 @@
+--   Copyright 2022 Martin Erhardt
 import Lexer
 import Exec (Shell)
 import Exec
