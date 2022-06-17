@@ -3,7 +3,8 @@ module Exec
  runSmpCmd,
  getDefaultShellEnv,
  expandWord,
- Shell
+ Shell,
+ getVar
 ) where
 import Lexer
 import TokParser (SmpCmd(..),parseToks)
@@ -28,12 +29,12 @@ data ShellEnv = ShellEnv { var :: Map.Map String String
 type Shell = StateT ShellEnv IO
 
 runSmpCmd :: SmpCmd -> Shell (Maybe ProcessStatus)
-runSmpCmd cmd = do
+runSmpCmd cmd = if cmdWords cmd /= [] then do
   -- lift . print $ cmdWords cmd
-  allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord <$> cmdWords cmd)
-  -- lift $ print allFields
-  if allFields == [] then return . Just $ Exited ExitSuccess
-  else launchCmd (head allFields) (tail allFields) (return ())
+                  allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord <$> cmdWords cmd)
+                  launchCmd (head allFields) (tail allFields) (return ())
+                else execAssigns >> (return . Just $ Exited ExitSuccess)
+  where execAssigns = foldl1 (>>) (doAssign <$> (assign cmd))
 
 getDefaultShellEnv :: ShellEnv
 getDefaultShellEnv = ShellEnv $ Map.fromList [("PS1","$ "), ("PS2","> ")]
@@ -66,9 +67,18 @@ launchCmdSub cmd = do
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
   lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
-type Field = String
+doAssign :: (String,String) -> Shell ()
+doAssign (name,word) = do
+  val <- expandNoSplit word
+  putVar name val
+
 getVar :: String -> Shell (Maybe String)
-getVar name = get >>= (\s -> return $ Map.lookup name (var s))
+getVar name =     get >>= return . (Map.lookup name) . var 
+
+putVar :: String -> String -> Shell ()
+putVar name val = get >>= return . ShellEnv . (Map.insert name val) . var >>= put
+-----------------------------------------------Word Expansion--------------------------------------------------------------
+type Field = String
 
 expandParams :: String -> Shell String
 expandParams name = getVar name >>= return . handleVal
@@ -103,7 +113,7 @@ removeQuotes = (eof >> return "")
            <|> (char '\\'   >> (++) <$> (anyChar >>= return . (:[]) )                   <*> removeQuotes )
            <|> (char '\xfe' >> (++) <$> (anyChar >>= return . (['\xfe']++) . (:[]) )    <*> removeQuotes )
            <|> (               (++) <$> (anyChar >>= return . (:[]) )                   <*> removeQuotes )
-  where escapes = (++) <$> (escape '\xfe' <|> (char '\\' >> anyChar >>= return . (:[])) ) -- remove backslashs, but do not remove \xfe (used to escape \xff)
+  where escapes = (++) <$> (escape '\xfe' <|> (char '\\' >> anyChar >>= return . (:[])) ) 
         dQuoteRecCond = escapes <|> ((++) <$> getDollarExp id stackNew)
 
 parse2ShellD :: Parser (Shell [Field]) -> String -> Shell [Field]
@@ -132,8 +142,8 @@ parseExps doFExps names = (eof >> (return . return) [""])
         getCmdSubExp = char '(' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew ")") )
         getParamExp  = char '{' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
         
-        appendStr2LF str  = (\action -> ppJoinEnds [str] <$> action)   <$> (parseExps doFExps names)
-        processFExp action = (appl1stOrd ppJoinEnds action)            <$> (parseExps doFExps names)
+        appendStr2LF str =                      (ppJoinEnds [str] <$>) <$> (parseExps doFExps names)
+        processFExp action =            (appl1stOrd ppJoinEnds action) <$> (parseExps doFExps names)
         processDQuote str = processFExp $ ((:[]) . enclose '"' . head) <$> (parse2ShellD (parseExps False names) str )
         processPost str = (parse2Shell escapeUnorigQuotes str >>= if doFExps then fieldExpand else return . (:[]) )
         processBQuote :: String -> Parser (Shell [Field])
@@ -141,6 +151,11 @@ parseExps doFExps names = (eof >> (return . return) [""])
         dExpDetected = (getVarExp names  >>= return . (\s -> return s >>= expandParams >>= processPost) )
                    <|> (getParamExp      >>= return . (\s -> return s >>= expandParams >>= processPost) )
                    <|> (getCmdSubExp     >>= return . (\s -> return s >>= launchCmdSub >>= processPost) )
+
+expandNoSplit :: String -> Shell String
+expandNoSplit cmdWord = parseExpsWNames >>= (flip parse2ShellD) cmdWord >>= (parse2Shell removeQuotes) . head
+  where parseExpsWNames :: Shell (Parser (Shell [Field]))
+        parseExpsWNames = ((fst <$>) <$> (get >>= return . Map.toList . var) ) >>= return . (parseExps False)
 
 expandWord :: String -> Shell [Field]
 expandWord cmdWord = do

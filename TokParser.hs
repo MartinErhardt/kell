@@ -2,7 +2,8 @@ module TokParser
 (
   parseToks,
   SmpCmd,
-  cmdWords
+  cmdWords,
+  assign
 ) where
 import qualified Text.Read as Rd
 import Text.Parsec
