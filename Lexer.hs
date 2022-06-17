@@ -51,7 +51,7 @@ data Token = Word String
   | Rbrace   -- }
   | Bang     -- !
   | In       -- in
-  deriving (Show, Eq)
+  deriving (Ord, Show, Eq)
 
 reservedOps :: [(String,Token)]
 reservedOps = [("&&",    AND_IF)

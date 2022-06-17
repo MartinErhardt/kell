@@ -3,7 +3,9 @@ module TokParser
   parseToks,
   SmpCmd,
   cmdWords,
-  assign
+  assign,
+  Redirect(Redirect),
+  redirects
 ) where
 import qualified Text.Read as Rd
 import Text.Parsec

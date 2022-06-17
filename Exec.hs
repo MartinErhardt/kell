@@ -1,3 +1,5 @@
+    {-# LANGUAGE ForeignFunctionInterface #-}
+    {-# LANGUAGE CApiFFI #-}
 module Exec
 (
  runSmpCmd,
@@ -7,13 +9,14 @@ module Exec
  getVar
 ) where
 import Lexer
-import TokParser (SmpCmd(..),parseToks)
+import TokParser (SmpCmd(..), parseToks, Redirect(..))
 
 import Text.Parsec
 import Text.Parsec.String
 import qualified Data.Map as Map
 import Data.Stack
 import qualified Data.List as L
+import qualified Text.Read as Rd
 import Control.Monad.Trans.State.Lazy
 import System.Posix.Process
 import System.Posix.IO
@@ -22,29 +25,42 @@ import System.Exit
 import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
+import Data.Bits
+import System.Posix.Types(Fd(..))
+import Foreign.C
+import Foreign.C.String
+import Foreign.C.Types(CInt(..), CUInt)
+import Data.Int(Int32(..))
+
+foreign import capi "openat" c_openat  :: CInt -> CString -> CInt -> CUInt -> IO CInt
+foreign import capi "fcntl.h value O_CREAT"  c_O_CREAT  :: CInt
+foreign import capi "fcntl.h value O_TRUNC"  c_O_TRUNC  :: CInt
+foreign import capi "fcntl.h value O_RDONLY" c_O_RDONLY :: CInt
+foreign import capi "fcntl.h value O_WRONLY" c_O_WRONLY :: CInt
+foreign import capi "fcntl.h value O_RDWR"   c_O_RDWR   :: CInt
+foreign import capi "fcntl.h value O_APPEND" c_O_APPEND :: CInt
+foreign import capi "fcntl.h value S_IRWXU"   c_S_IRWXU  :: CUInt
+--foreign import capi "fcntl.h value S_I"  c_S_I  :: CUInt
+foreign import capi "errno.h value errno"    c_errno    :: CUInt
 
 data ShellEnv = ShellEnv { var :: Map.Map String String
-                                -- , func :: Map.Map String String
-                                 } deriving(Eq, Show)
+                      -- , func :: Map.Map String String
+                         , fileMode :: CUInt
+                         } deriving(Eq, Show)
 type Shell = StateT ShellEnv IO
 
 runSmpCmd :: SmpCmd -> Shell (Maybe ProcessStatus)
 runSmpCmd cmd = if cmdWords cmd /= [] then do
-  -- lift . print $ cmdWords cmd
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord <$> cmdWords cmd)
-                  launchCmd (head allFields) (tail allFields) (return ())
-                else execAssigns >> (return . Just $ Exited ExitSuccess)
-  where execAssigns = foldl1 (>>) (doAssign <$> (assign cmd))
+                  if allFields /= [] then launchCmd (head allFields) (tail allFields) (execAssigns >> execRedirects)
+                  else execLocal
+                else execLocal
+  where execAssigns =   if assign cmd /= []    then foldl1 (>>) (doAssign   <$> (assign cmd))    else return ()
+        execRedirects = if redirects cmd /= [] then foldl1 (>>) (doRedirect <$> (redirects cmd)) else return ()
+        execLocal = execAssigns >> execRedirects >> (return . Just $ Exited ExitSuccess)
 
 getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv $ Map.fromList [("PS1","$ "), ("PS2","> ")]
-
-launchCmd :: FilePath -> [String] -> IO () -> Shell (Maybe ProcessStatus)
-launchCmd cmd args redirects = do
-  forkedPId <- lift . forkProcess $ do
-    -- redirects
-    getEnvironment >>= (\env -> executeFile cmd True args (Just env) )
-  lift $ getProcessStatus True True forkedPId
+getDefaultShellEnv = ShellEnv (Map.fromList [("PS1","$ "), ("PS2","> ")]) c_S_IRWXU
 
 execSubShell :: String -> Shell ()
 execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()
@@ -52,6 +68,13 @@ execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast)
                                 (Left err)  -> lift $ print err
   where toks = parse lexer "subshell" cmd
         parse2Ast = parse parseToks "tokenstreamsubshell"
+
+launchCmd :: FilePath -> [String] -> Shell () -> Shell (Maybe ProcessStatus)
+launchCmd cmd args prepare = do 
+  curEnv <- get
+  forkedPId <- lift . forkProcess $ evalStateT (prepare >> lift runInCurEnv) curEnv >> return ()
+  lift $ getProcessStatus True True forkedPId
+  where runInCurEnv = getEnvironment >>= (executeFile cmd True args) . Just
 
 launchCmdSub :: String -> Shell String
 launchCmdSub cmd = do
@@ -62,21 +85,34 @@ launchCmdSub cmd = do
     dupTo (snd pipe) stdOutput
     evalStateT (execSubShell cmd) curEnv
     return ()
-   -- exitImmediately ExitSuccess
   lift $ (fdToHandle . snd $ pipe) >>= hClose
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
   lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
 doAssign :: (String,String) -> Shell ()
-doAssign (name,word) = do
-  val <- expandNoSplit word
-  putVar name val
+doAssign (name,word) = expandNoSplit word >>= putVar name
+
+doRedirect :: Redirect -> Shell ()
+doRedirect (Redirect tok fd path) = get >>= lift . (getAction tok fd path) . fileMode >>= return . return ()
+  where hsOpenAt :: CInt -> Int -> String -> CUInt -> IO (Fd)
+        hsOpenAt flags fd path mode = do
+	  -- closeFd . Fd $ fromIntegral fd
+          cPath <- newCString path
+          c_openat (fromIntegral fd) cPath flags mode >>= print >> (return . Fd . fromIntegral $ 0)
+        redirAction = [(LESS,      hsOpenAt $ c_O_CREAT .|. c_O_TRUNC  .|. c_O_RDONLY)
+                      ,(GREAT,     hsOpenAt $ c_O_CREAT .|. c_O_TRUNC  .|. c_O_WRONLY)
+                      ,(DGREAT,    hsOpenAt $ c_O_CREAT .|. c_O_APPEND .|. c_O_WRONLY)
+                      ,(LESSGREAT, hsOpenAt $ c_O_CREAT .|. c_O_RDWR)
+                      ,(LESSAND,   (\fd1 fd2 m -> dupTo (Fd $ fromIntegral fd1) (Fd . fromIntegral $ Rd.read fd2) ) )
+                      ,(GREATAND,  (\fd1 fd2 m -> dupTo (Fd $ fromIntegral fd1) (Fd . fromIntegral $ Rd.read fd2) ) )]
+        getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents
 
 getVar :: String -> Shell (Maybe String)
 getVar name =     get >>= return . (Map.lookup name) . var 
 
 putVar :: String -> String -> Shell ()
-putVar name val = get >>= return . ShellEnv . (Map.insert name val) . var >>= put
+putVar name val = get >>= return . changeNamespace ( (Map.insert name val) . var) >>= put
+  where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (fileMode curEnv)
 -----------------------------------------------Word Expansion--------------------------------------------------------------
 type Field = String
 
@@ -154,8 +190,7 @@ parseExps doFExps names = (eof >> (return . return) [""])
 
 expandNoSplit :: String -> Shell String
 expandNoSplit cmdWord = parseExpsWNames >>= (flip parse2ShellD) cmdWord >>= (parse2Shell removeQuotes) . head
-  where parseExpsWNames :: Shell (Parser (Shell [Field]))
-        parseExpsWNames = ((fst <$>) <$> (get >>= return . Map.toList . var) ) >>= return . (parseExps False)
+  where parseExpsWNames = ((fst <$>) <$> (get >>= return . Map.toList . var) ) >>= return . (parseExps False)
 
 expandWord :: String -> Shell [Field]
 expandWord cmdWord = do
