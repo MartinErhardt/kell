@@ -14,7 +14,6 @@ import Text.Parsec.Error
 import System.IO
 
 main :: IO ()
--- main = putStr "hello" >> getLine >> return ()
 main = evalStateT (printPrompt "\"$PS1\"" >> lift getLine >>= cmdPrompt ) getDefaultShellEnv >> return ()
 -- unpack . replace (pack "\\\n") (pack "") . pack -- >> exitImmediately ExitSuccess
 
@@ -24,17 +23,15 @@ printPrompt var = lift (hFlush stdout) >> expandWord var >>= lift . putStr . hea
 cmdPrompt :: String -> Shell ()
 cmdPrompt curCmd = do
   --lift $ print toks
-  if last curCmd == '\\' then incomplete $ init curCmd 
-  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runSmpCmd ast    >> continuePrompt
+  if curCmd == "" then continuePrompt
+  else if last curCmd == '\\' then incomplete $ init curCmd 
+  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runSmpCmd ast >> continuePrompt
                                                      (Left e)    -> handleErrs e
                     (Left e) -> handleErrs e
   where parse2AST = parse parseToks "charstream"
         toks      = parse lexer "tokenstream" curCmd
-        incomplete :: String -> Shell ()
-        incomplete str = printPrompt "\"$PS2\""    >> lift getLine >>= (cmdPrompt . (str++))
-        -- continuePrompt :: Shell (Maybe ProcessStatus)
-        continuePrompt = printPrompt "\"$PS1\""  >> lift getLine >>= cmdPrompt
-        handleErrs :: ParseError -> Shell ()
+        incomplete str = printPrompt "\"$PS2\"" >> lift getLine >>= (cmdPrompt . (str++))
+        continuePrompt = printPrompt "\"$PS1\"" >> lift getLine >>= cmdPrompt
         handleErrs e = if "eof" `elem` (messageString <$> errorMessages e) then incomplete (curCmd ++ "\n")
                        else (lift $ print e ) >> continuePrompt
 --main = getLine >>= print . parse lexer "stdin" --"stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
