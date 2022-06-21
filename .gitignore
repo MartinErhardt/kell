@@ -3,3 +3,4 @@
 hssh
 *.swp
 '.swo
+dist-newstyle/*
