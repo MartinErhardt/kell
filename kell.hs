@@ -31,7 +31,7 @@ main = evalStateT (printPrompt "$PS1" >> lift getLine >>= cmdPrompt ) getDefault
 -- unpack . replace (pack "\\\n") (pack "") . pack -- >> exitImmediately ExitSuccess
 
 printPrompt :: String -> Shell ()
-printPrompt var = lift (hFlush stdout) >> expandNoSplit var >>= lift . putStr >> lift (hFlush stdout)
+printPrompt var = lift (hFlush stdout) >> expandNoSplit execSubShell var >>= lift . putStr >> lift (hFlush stdout)
 
 cmdPrompt :: String -> Shell ()
 cmdPrompt curCmd = do
