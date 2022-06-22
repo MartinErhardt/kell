@@ -32,6 +32,7 @@ import qualified Data.Map as Map
 import Data.Stack
 import qualified Data.List as L
 import qualified Text.Read as Rd
+import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import System.Posix.Process
 import System.Posix.IO
@@ -56,8 +57,13 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         execRedirects = if redirects cmd /= [] then foldl1 (>>) (doRedirect <$> (redirects cmd)) else return ()
         execLocal = execAssigns >> execRedirects >> (return . Just $ Exited ExitSuccess)
 
-getDefaultShellEnv :: ShellEnv
-getDefaultShellEnv = ShellEnv (Map.fromList [("PS1","$ "), ("PS2","> ")]) ownerModes
+getDefaultShellEnv :: IO ShellEnv
+getDefaultShellEnv = do
+  envVars <- getEnvironment
+  return $ ShellEnv (Map.fromList $ ((\(name,val) -> (name,(val,True))) <$> envVars) ++ preDefined) ownerModes
+  where preDefined = [("PS1",("$ ",True))
+                    ,("PS2", ("> ",True))
+                    ,("SHELL",   ("kell", True))]
 
 execSubShell :: String -> Shell ()
 execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()

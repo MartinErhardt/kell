@@ -31,9 +31,10 @@ import Text.Parsec
 import Text.Parsec.String (Parser)
 
 import Control.Monad.Trans.State.Lazy
---import Control.Monad.Class
+import Control.Monad.Trans.Class
 import System.Posix.Types(Fd(..),FileMode)
 import System.Posix.Files
+import System.Environment
 
 data Token = Word String
   -- operators as in https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#:~:text=command%20is%20parsed.-,2.10.2,-Shell%20Grammar%20Rules
@@ -93,17 +94,19 @@ dQuote = quoteEsc $ (++) <$> (escape '\\' <|> (getDollarExp id stackNew ) )
 
 getDollarExp :: (String -> String) -> Stack String -> Parser String
 getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
-  where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing else (\(Just s)-> Just $ fst s) $ stackPop s
+  where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing
+                            else (\(Just s)-> Just $ fst s) $ stackPop s
         stackAction s = [("$((", Just $ stackPush s "))")
                         ,("$(",  Just $ stackPush s ")")
                         ,("${",  Just $ stackPush s "}")
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = (try $ string str) >> if stackIsEmpty a then return $ f str else quote (getDollarExp f a) >>= return . (str++)
+        stackHandler (str, (Just a)) = (try $ string str) >> if stackIsEmpty a then return $ f str
+                                                             else quote (getDollarExp f a) >>= return . (str++)
         stackHandler (str, Nothing) = fail ""
 
-data ShellEnv = ShellEnv { var :: Map.Map String String
+data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
                       -- , func :: Map.Map String String
                          , shFMode :: FileMode
                          } deriving(Eq, Show)
@@ -111,8 +114,15 @@ data ShellEnv = ShellEnv { var :: Map.Map String String
 type Shell = StateT ShellEnv IO
 
 getVar :: String -> Shell (Maybe String)
-getVar name =     get >>= return . (Map.lookup name) . var
+getVar name =     get >>= return . getVal . (Map.lookup name) . var
+  where getVal entry = case entry of (Just (val, _)) -> Just val
+                                     _               -> Nothing
 
 putVar :: String -> String -> Shell ()
-putVar name val = get >>= return . changeNamespace ( (Map.insert name val) . var) >>= put
+putVar name newval = do
+  oldentry <- get >>= return . (Map.lookup name) . var
+  case oldentry of (Just (_,True)) -> lift $ setEnv name newval 
+  get >>= put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
   where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (shFMode curEnv)
+        newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
+                                                    _               -> (newval, False)

@@ -27,7 +27,7 @@ import Text.Parsec.Error
 import System.IO
 
 main :: IO ()
-main = evalStateT (printPrompt "$PS1" >> lift getLine >>= cmdPrompt ) getDefaultShellEnv >> return ()
+main = getDefaultShellEnv >>= evalStateT (printPrompt "$PS1" >> lift getLine >>= cmdPrompt ) >> return ()
 -- unpack . replace (pack "\\\n") (pack "") . pack -- >> exitImmediately ExitSuccess
 
 printPrompt :: String -> Shell ()

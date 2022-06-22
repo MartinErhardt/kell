@@ -35,10 +35,10 @@ launchCmdSub launcher cmd = do
   pipe      <- lift createPipe
   curEnv    <- get
   forkedPId <- lift . forkProcess $ do
-    (fdToHandle . fst $ pipe) >>= hClose
+    closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
     evalStateT (launcher cmd) curEnv
-  lift $ (fdToHandle . snd $ pipe) >>= hClose
+  lift $ closeFd . snd $ pipe
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
   lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
