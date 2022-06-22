@@ -29,9 +29,11 @@ import Text.Parsec.String
 import Lexer (Token (..))
 import System.IO
 import Data.Maybe
+import System.Posix.IO
+import System.Posix.Types(Fd(..))
 import qualified Data.Map as Map
 
-data Redirect = Redirect Token Int String deriving (Eq,Show)
+data Redirect = Redirect Token Fd String deriving (Eq,Show)
 data SmpCmd = SmpCmd { redirects ::  [Redirect]
                      , assign :: [(String,String)]
                      , cmdWords :: [String]
@@ -85,19 +87,22 @@ op :: Token -> TokParser ()
 op tok = tokenPrim show nextPosTok (\t -> if t == tok then Just () else Nothing)
 
 parseIORedirect :: TokParser Redirect
-parseIORedirect = do
-  n <- getIONr
-  redirOp <- tokenPrim show nextPosTok (\o -> testOp o >>= isRedirOp)
-  file <- getWord
-  return $ Redirect redirOp n file
-  where isRedirOp tok = if tok `elem` [LESS,GREAT,DLESS,DGREAT,LESSAND,GREATAND,LESSGREAT] then Just tok else Nothing
---        IOactions = [(LESS, )
---                    ,(GREAT, )
---		    ,(DGREAT, )
---		    ,(DLESS, )
---		    ,(LESSAND, )
---		    ,(GREATAND, )
---		    ,(LESSGREAT, )
+parseIORedirect = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord) <|> do
+  n       <- getIONr
+  redirOp <- getRedirOp
+  file    <- getWord
+  return $ Redirect redirOp (Fd . fromIntegral $ n) file
+  where getRedirOp = tokenPrim show nextPosTok (\o -> testOp o >>= isRedirOp)
+        defaultFd = [(LESS,     stdInput)
+                    ,(GREAT,    stdOutput)
+                    ,(CLOBBER,  stdOutput)
+                    ,(DLESS,    stdInput)
+                    ,(DGREAT,   stdOutput)
+                    ,(LESSAND,  stdInput)
+                    ,(GREATAND, stdOutput)
+                    ,(LESSGREAT,stdInput)]
+        getDefOp = (\(Just v) -> v) . (flip Map.lookup) (Map.fromList defaultFd)
+        isRedirOp tok = if tok `elem` (fst <$> defaultFd) then Just tok else Nothing
 
 parseSmpCmd :: TokParser SmpCmd
 parseSmpCmd = addRedirect <$> parseIORedirect <*> (parseSmpCmd <|> base)

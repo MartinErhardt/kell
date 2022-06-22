@@ -64,7 +64,7 @@ getDefaultShellEnv = do
   return $ ShellEnv (Map.fromList $ ( (\(name,val) -> (name,(val,True))) <$> envVars) ++ preDefined) ownerModes
   where preDefined = [("PS1", ("$ ",False))
                     ,("PS2",  ("> ",False))
-                   ,("SHELL",("kell",True))]
+                    ,("SHELL",("kell",True))]
 
 execSubShell :: String -> Shell ()
 execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()
@@ -85,13 +85,16 @@ doAssign :: (String,String) -> Shell ()
 doAssign (name,word) = (expandNoSplit execSubShell word) >>= putVar name
 
 doRedirect :: Redirect -> Shell ()
-doRedirect (Redirect tok fd path) = get >>= lift . (getAction tok (Fd $ fromIntegral fd) path) . shFMode >>= return . return ()
+doRedirect (Redirect tok fd path) = get >>= lift . (getAction tok fd path) . shFMode >>= return . return ()
   where truncOFlag  = (OpenFileFlags False False False False True)
+        noFlag      = (OpenFileFlags False False False False False)
         appendOFlag = (OpenFileFlags True  False False False False)
-        redirAction = [(LESS,      (\fd path m -> openFd path ReadOnly  (Just m) truncOFlag  >>= (flip dupTo $ fd)))
-                      ,(GREAT,     (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= (flip dupTo $ fd)))
+        redirAction = [(LESS,      (\fd path m -> openFd path ReadOnly  (Just m) noFlag      >>= (flip dupTo $ fd)))
+                      ,(GREAT,     (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= (flip dupTo $ fd))) --TODO case file exists and noclobber opt
+                      ,(CLOBBER,   (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= (flip dupTo $ fd)))
                       ,(DGREAT,    (\fd path m -> openFd path WriteOnly (Just m) appendOFlag >>= (flip dupTo $ fd)))
-                      ,(LESSGREAT, (\fd path m -> openFd path ReadWrite (Just m) truncOFlag  >>= (flip dupTo $ fd)))
+                      -- TODO DLESS
+                      ,(LESSGREAT, (\fd path m -> openFd path ReadWrite (Just m) noFlag      >>= (flip dupTo $ fd)))
                       ,(LESSAND,   (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) ) )
                       ,(GREATAND,  (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) ) )]
         getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents

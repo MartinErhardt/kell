@@ -41,12 +41,12 @@ data Token = Word String
   | AND_IF   -- &&
   | OR_IF    -- ||
   | DSEMI    -- ;;
+  | DLESSDASH-- <<-
   | DLESS    -- <<
   | DGREAT   -- >>
   | LESSAND  -- <&
   | GREATAND -- >&
   | LESSGREAT-- <>
-  | DLESSDASH-- <<-
   | CLOBBER  -- >|
   | If       -- if
   | Then     -- then
