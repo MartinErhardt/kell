@@ -60,10 +60,11 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
 getDefaultShellEnv :: IO ShellEnv
 getDefaultShellEnv = do
   envVars <- getEnvironment
-  return $ ShellEnv (Map.fromList $ ((\(name,val) -> (name,(val,True))) <$> envVars) ++ preDefined) ownerModes
-  where preDefined = [("PS1",("$ ",True))
-                    ,("PS2", ("> ",True))
-                    ,("SHELL",   ("kell", True))]
+  foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
+  return $ ShellEnv (Map.fromList $ ( (\(name,val) -> (name,(val,True))) <$> envVars) ++ preDefined) ownerModes
+  where preDefined = [("PS1", ("$ ",False))
+                    ,("PS2",  ("> ",False))
+                   ,("SHELL",("kell",True))]
 
 execSubShell :: String -> Shell ()
 execSubShell cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> runSmpCmd ast >> return ()
