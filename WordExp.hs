@@ -28,9 +28,11 @@ import Text.Parsec.String (Parser)
 import System.Posix.IO
 import System.Posix.Process
 import System.IO
+import System.Exit
+
 type Field = String
 
-launchCmdSub :: (String -> Shell ()) -> String -> Shell String
+launchCmdSub :: (String -> Shell ExitCode) -> String -> Shell String
 launchCmdSub launcher cmd = do
   pipe      <- lift createPipe
   curEnv    <- get
@@ -38,6 +40,7 @@ launchCmdSub launcher cmd = do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
     evalStateT (launcher cmd) curEnv
+    return ()
   lift $ closeFd . snd $ pipe
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
   lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
@@ -108,14 +111,14 @@ parseExps doFExps names = (eof >> return [])
         getParamExp  = char '{' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
         processDQuote = enc (ExpTok NoExp False "\"") . (\(Right v) -> v) . parse (parseExps False names) "qE"
 
-execExp :: (String -> Shell ()) -> ExpTok -> Shell [Field]
+execExp :: (String -> Shell ExitCode) -> ExpTok -> Shell [Field]
 execExp launcher (ExpTok NoExp _ s) = return [s]
 execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub launcher s
                                                 ParamExp -> expandParams s
                          >>= return . (\(Right v) -> v) . parse escapeUnorigQuotes "EscapeUnorigQuotes"
                          >>= if split then fieldExpand else return . (:[])
 
-expandWord :: (String -> Shell()) -> Bool -> String -> Shell [Field]
+expandWord :: (String -> Shell ExitCode) -> Bool -> String -> Shell [Field]
 expandWord launcher split cmdWord = do
   env  <- get
   exps <- parse2Shell (parseExps split $ names env) cmdWord
@@ -133,5 +136,5 @@ expandWord launcher split cmdWord = do
   where names env = fst <$> (Map.toList $ var env)
         ppJoinEnds l1 l2 = init l1 ++ [last l1 ++ head l2] ++ tail l2
 
-expandNoSplit :: (String -> Shell()) -> String -> Shell Field
+expandNoSplit :: (String -> Shell ExitCode) -> String -> Shell Field
 expandNoSplit launcher cmdWord = expandWord launcher False cmdWord >>= return . head

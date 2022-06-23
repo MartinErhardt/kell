@@ -121,7 +121,8 @@ getVar name =     get >>= return . getVal . (Map.lookup name) . var
 putVar :: String -> String -> Shell ()
 putVar name newval = do
   oldentry <- get >>= return . (Map.lookup name) . var
-  case oldentry of (Just (_,True)) -> lift $ setEnv name newval 
+  case oldentry of (Just (_,True)) -> lift $ setEnv name newval
+                   _               -> return ()
   get >>= put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
   where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (shFMode curEnv)
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)

@@ -14,7 +14,9 @@
 module TokParser
 (
   parseToks,
-  SmpCmd,
+  parseSmpCmd,
+  TokParser,
+  SmpCmd, Pipeline,
   cmdWords,
   assign,
   Redirect(Redirect),
@@ -38,8 +40,18 @@ data SmpCmd = SmpCmd { redirects ::  [Redirect]
                      , assign :: [(String,String)]
                      , cmdWords :: [String]
                      } deriving(Eq, Show)
---instance P
+--data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
+--data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
+
+--data AndOr = AndOR AndSep  | OrSep  deriving(Enum)
+--data Sep   = Sep   SemiSep | AmpSep deriving(Enum)
+
+type Pipeline  = [SmpCmd]
+type AndOrList = [(Pipeline, Token)] -- Last Token has no meaning
+type SepList   = [(AndOrList,Token)]
+
 type TokParser = Parsec [Token] ()
+
 testWord :: Token -> Maybe String
 testWord tok = case tok of (Word w) -> Just w
                            _        -> Nothing
@@ -61,6 +73,9 @@ getToken str = Map.lookup str (Map.fromList reservedWords)
 
 getWord :: TokParser String
 getWord = tokenPrim show nextPosW (\w -> testWord w >>= (\w -> if w `elem` (fst <$> reservedWords) then Nothing else Just w))
+
+oneOfOp :: [Token] -> TokParser Token
+oneOfOp ops = tokenPrim show nextPosTok (\tok -> if tok `elem` ops then Just tok else Nothing )
 
 getAssignWord :: TokParser (String,String)
 getAssignWord = tokenPrim show nextPosW (\w -> testWord w >>= isAssignWord)
@@ -116,5 +131,28 @@ parseSmpCmd = addRedirect <$> parseIORedirect <*> (parseSmpCmd <|> base)
                      <|> addWord     <$> getWord         <*> parseSmpCmdSuf
                      <|> base
 
-parseToks :: TokParser SmpCmd
-parseToks = parseSmpCmd >>= (\smpCmd -> (eof <|> op EOF) >> return smpCmd)
+parseList :: [Token] -> TokParser a -> TokParser [(a,Token)]
+parseList sepToks parseElem = try(recList) <|> (parseElem >>= (\e -> return . (:[]) $ (e,EOF))) <|> return []
+  where recList = do
+          elem <- parseElem
+          sep  <- oneOfOp sepToks
+          rest <- parseList sepToks parseElem
+          return $ [(elem,sep)] ++ rest
+
+parsePipe :: TokParser Pipeline
+parsePipe = (fst <$>) <$> parseList [PIPE] parseSmpCmd
+
+parseAndOrList :: TokParser AndOrList
+parseAndOrList = parseList [AND_IF, OR_IF] parsePipe
+
+parseSepList :: TokParser SepList
+parseSepList = replaceLast <$> parseList seps parseAndOrList <*> (lastSep <|> return EOF)
+  where replaceLast l tok = tail l ++ [(fst . last $ l, tok)]
+        seps = [SEMI, Ampersand]
+        lastSep = oneOfOp seps
+
+parseToks :: TokParser Pipeline
+parseToks = parsePipe >>= (\pipe -> (eof <|> op EOF) >> return pipe)
+
+parseCmd :: TokParser SmpCmd
+parseCmd  = parseSmpCmd  >>= (\smpCmd  -> (eof <|> op EOF) >> return smpCmd)

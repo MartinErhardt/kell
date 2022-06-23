@@ -31,14 +31,14 @@ main = getDefaultShellEnv >>= evalStateT (printPrompt "$PS1" >> lift getLine >>=
 -- unpack . replace (pack "\\\n") (pack "") . pack -- >> exitImmediately ExitSuccess
 
 printPrompt :: String -> Shell ()
-printPrompt var = lift (hFlush stdout) >> expandNoSplit execSubShell var >>= lift . putStr >> lift (hFlush stdout)
+printPrompt var = lift (hFlush stdout) >> expandNoSplit execCmd var >>= lift . putStr >> lift (hFlush stdout)
 
 cmdPrompt :: String -> Shell ()
 cmdPrompt curCmd = do
   --lift $ print toks
   if curCmd == "" then continuePrompt
   else if last curCmd == '\\' then incomplete $ init curCmd 
-  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runSmpCmd ast >> continuePrompt
+  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runPipe ast >> continuePrompt
                                                      (Left e)    -> handleErrs e
                     (Left e) -> handleErrs e
   where parse2AST = parse parseToks "charstream"
