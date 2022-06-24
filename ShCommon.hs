@@ -114,7 +114,7 @@ data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
 type Shell = StateT ShellEnv IO
 
 getVar :: String -> Shell (Maybe String)
-getVar name =     get >>= return . getVal . (Map.lookup name) . var
+getVar name = get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
 

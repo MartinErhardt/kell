@@ -60,9 +60,11 @@ testOp tok = case tok of (Word w) -> Nothing
                          NEWLINE  -> Nothing
                          EOF      -> Nothing
                          t        -> Just t
+
 nextPosW pos (Word w) xs  = incSourceColumn pos (length w +1)
 nextPosTok pos x xs  = incSourceColumn pos 1
-reservedWords::[(String,Token)]
+
+reservedWords :: [(String,Token)]
 reservedWords = [("{", Lbrace)
                 ,("}", Rbrace)
                 ,("!", Bang)

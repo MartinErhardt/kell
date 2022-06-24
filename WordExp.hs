@@ -17,7 +17,7 @@ module WordExp(
   expandNoSplit
 ) where
 import ShCommon
-
+import ExpArith
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import Data.Stack
@@ -91,13 +91,14 @@ data ExpTok = ExpTok { expTyp :: ExpType
 
 parseExps :: Bool -> [String] -> Parser [ExpTok]
 parseExps doFExps names = (eof >> return [])
-        <|> (char '$'  >>((++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getVExp names <*> parseExps doFExps names
-                      <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getParamExp   <*> parseExps doFExps names
-                      <|> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> getCmdSubExp  <*> parseExps doFExps names ) )
-        <|> (char '`'  >> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> bQuoteRem     <*> parseExps doFExps names )
-        <|> (char '\'' >> (++) . (:[]) . (ExpTok NoExp False) . enc '\'' <$> quoteRem      <*> parseExps doFExps names )
-        <|> (char '"'  >> (++) . processDQuote                           <$> dQuoteRem     <*> parseExps doFExps names )
-        <|>               (++) . (:[]) . (ExpTok NoExp False)            <$> readNoExp     <*> parseExps doFExps names
+        <|> (char '$'  >>((++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getVExp names    <*> parseExps doFExps names
+                      <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getExp "{" "}"   <*> parseExps doFExps names
+                      <|> (++) . (:[]) . (ExpTok ArithExp doFExps)       <$> getExp "((" "))" <*> parseExps doFExps names
+                      <|> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> getExp "(" ")"   <*> parseExps doFExps names ) )
+        <|> (char '`'  >> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> bQuoteRem        <*> parseExps doFExps names )
+        <|> (char '\'' >> (++) . (:[]) . (ExpTok NoExp False) . enc '\'' <$> quoteRem         <*> parseExps doFExps names )
+        <|> (char '"'  >> (++) . processDQuote                           <$> dQuoteRem        <*> parseExps doFExps names )
+        <|>               (++) . (:[]) . (ExpTok NoExp False)            <$> readNoExp        <*> parseExps doFExps names
   where enc c = (++[c]) . ([c]++)
         readNoExp = (++) <$> (escape '\\' <|> (noneOf "$`'\"" >>= return . (:[])) ) <*> (readNoExp <|> return "")
 
@@ -107,14 +108,14 @@ parseExps doFExps names = (eof >> return [])
                                                   <|> (anyChar >>= return . (['\\']++) . (:[]) ) ) ) ) (char '`' >> return "")
         getVExp :: [String] -> Parser String
         getVExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
-        getCmdSubExp = char '(' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew ")") )
-        getParamExp  = char '{' >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew "}") )
+        getExp begin end = try( string begin) >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew end) )
         processDQuote = enc (ExpTok NoExp False "\"") . (\(Right v) -> v) . parse (parseExps False names) "qE"
 
 execExp :: (String -> Shell ExitCode) -> ExpTok -> Shell [Field]
 execExp launcher (ExpTok NoExp _ s) = return [s]
 execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub launcher s
                                                 ParamExp -> expandParams s
+                                                ArithExp -> expandArith s
                          >>= return . (\(Right v) -> v) . parse escapeUnorigQuotes "EscapeUnorigQuotes"
                          >>= if split then fieldExpand else return . (:[])
 

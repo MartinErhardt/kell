@@ -17,7 +17,7 @@ extra-source-files:  CHANGELOG.md
 
 executable kell
   main-is:             kell.hs
-  other-modules:       ShCommon, WordExp, Lexer, TokParser, Exec
+  other-modules:       ShCommon, ExpArith, WordExp, Lexer, TokParser, Exec
   ghc-options:         -O2
                        -threaded
   -- other-extensions:
