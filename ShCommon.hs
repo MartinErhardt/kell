@@ -96,9 +96,9 @@ getDollarExp :: (String -> String) -> Stack String -> Parser String
 getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
   where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing
                             else (\(Just s)-> Just $ fst s) $ stackPop s
-        stackAction s = [("$((", Just $ stackPush s "))")
-                        ,("$(",  Just $ stackPush s ")")
-                        ,("${",  Just $ stackPush s "}")
+        stackAction s = [("((", Just $ stackPush s "))")
+                        ,("(",  Just $ stackPush s ")")
+                        ,("{",  Just $ stackPush s "}")
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]

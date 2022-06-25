@@ -65,7 +65,7 @@ parseWord = (eof       >>            return "" )
         <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" ) <*> (parseWord <|> return "") ) )
         <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" ) <*> (parseWord <|> return "") ) )
         <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"") <*> (parseWord <|> return "") ) )
-        <|> (              (++)            <$> getDollarExp id stackNew          <*> (parseWord <|> return "") ) -- word expansion
+        <|> (char '$'  >> ((++) . ("$"++)  <$> getDollarExp id stackNew          <*> (parseWord <|> return "") ) )-- word expansion
         <|> (             ((++) . (:[]))   <$> noneOf forbidden                  <*> (parseWord <|> return "") )-- parse letter
   where forbidden = ((head . fst) <$> reservedOps) ++ " "
 
