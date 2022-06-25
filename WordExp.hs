@@ -36,7 +36,6 @@ launchCmdSub :: (String -> Shell ExitCode) -> String -> Shell String
 launchCmdSub launcher cmd = do
   pipe      <- lift createPipe
   curEnv    <- get
-  lift $ print cmd
   forkedPId <- lift . forkProcess $ do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput

@@ -103,8 +103,8 @@ getOp = tokenPrim show nextPosTok testOp
 op :: Token -> TokParser ()
 op tok = tokenPrim show nextPosTok (\t -> if t == tok then Just () else Nothing)
 
-parseIORedirect :: TokParser Redirect
-parseIORedirect = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord) <|> do
+parseIORed :: TokParser Redirect
+parseIORed = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord) <|> do
   n       <- getIONr
   redirOp <- getRedirOp
   file    <- getWord
@@ -122,14 +122,14 @@ parseIORedirect = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> get
         isRedirOp tok = if tok `elem` (fst <$> defaultFd) then Just tok else Nothing
 
 parseSmpCmd :: TokParser SmpCmd
-parseSmpCmd = addRedirect <$> parseIORedirect <*> (parseSmpCmd <|> base)
+parseSmpCmd = addRedirect <$> try(parseIORed) <*> (parseSmpCmd <|> base)
           <|> addAssign   <$> getAssignWord   <*> (parseSmpCmd <|> base)
           <|> addWord     <$> getWord         <*>  parseSmpCmdSuf
   where base = return $ SmpCmd [] [] []
         addRedirect redir cmd = SmpCmd ([redir] ++ redirects cmd) (assign cmd)             (cmdWords cmd)
         addAssign strstr cmd =  SmpCmd (redirects cmd)            ([strstr] ++ assign cmd) (cmdWords cmd)
         addWord str cmd =       SmpCmd (redirects cmd)            (assign cmd)             ([str] ++ cmdWords cmd)
-        parseSmpCmdSuf = addRedirect <$> parseIORedirect <*> parseSmpCmdSuf 
+        parseSmpCmdSuf = addRedirect <$> try(parseIORed) <*> parseSmpCmdSuf 
                      <|> addWord     <$> getWord         <*> parseSmpCmdSuf
                      <|> base
 
