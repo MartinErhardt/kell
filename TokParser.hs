@@ -121,6 +121,11 @@ parseIORed = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord)
         getDefOp = (\(Just v) -> v) . (flip Map.lookup) (Map.fromList defaultFd)
         isRedirOp tok = if tok `elem` (fst <$> defaultFd) then Just tok else Nothing
 
+newlineList :: TokParser ()
+newlineList = (tokenPrim show nextPosTok getNewline >> newlineList) <|> return ()
+  where getNewline w = case w of NEWLINE -> Just ()
+                                 _       -> Nothing
+
 parseSmpCmd :: TokParser SmpCmd
 parseSmpCmd = addRedirect <$> try(parseIORed) <*> (parseSmpCmd <|> base)
           <|> addAssign   <$> getAssignWord   <*> (parseSmpCmd <|> base)
@@ -129,26 +134,26 @@ parseSmpCmd = addRedirect <$> try(parseIORed) <*> (parseSmpCmd <|> base)
         addRedirect redir cmd = SmpCmd ([redir] ++ redirects cmd) (assign cmd)             (cmdWords cmd)
         addAssign strstr cmd =  SmpCmd (redirects cmd)            ([strstr] ++ assign cmd) (cmdWords cmd)
         addWord str cmd =       SmpCmd (redirects cmd)            (assign cmd)             ([str] ++ cmdWords cmd)
-        parseSmpCmdSuf = addRedirect <$> try(parseIORed) <*> parseSmpCmdSuf 
+        parseSmpCmdSuf = addRedirect <$> try(parseIORed) <*> parseSmpCmdSuf
                      <|> addWord     <$> getWord         <*> parseSmpCmdSuf
                      <|> base
 
-parseList :: [Token] -> TokParser a -> TokParser [(a,Token)]
-parseList sepToks parseElem = try(recList) <|> (parseElem >>= (\e -> return . (:[]) $ (e,EOF))) <|> return []
-  where recList = do
-          elem <- parseElem
+parseList :: Bool -> [Token] -> TokParser a -> TokParser [(a,Token)]
+parseList nLs sepToks parseElem = parseElem >>= (\e -> recList e <|> return [(e,EOF)] )
+  where recList elem = do
           sep  <- oneOfOp sepToks
-          rest <- parseList sepToks parseElem
+          if nLs then newlineList else return ()
+          rest <- parseList nLs sepToks parseElem
           return $ [(elem,sep)] ++ rest
 
 parsePipe :: TokParser Pipeline
-parsePipe = (fst <$>) <$> parseList [PIPE] parseSmpCmd
+parsePipe = (fst <$>) <$> parseList True [PIPE] parseSmpCmd
 
 parseAndOrList :: TokParser AndOrList
-parseAndOrList = parseList [AND_IF, OR_IF] parsePipe
+parseAndOrList = parseList True [AND_IF, OR_IF] parsePipe
 
 parseSepList :: TokParser SepList
-parseSepList = replaceLast <$> parseList seps parseAndOrList <*> (lastSep <|> return EOF)
+parseSepList = replaceLast <$> parseList False seps parseAndOrList <*> (lastSep <|> return EOF)
   where replaceLast l tok = tail l ++ [(fst . last $ l, tok)]
         seps = [SEMI, Ampersand]
         lastSep = oneOfOp seps

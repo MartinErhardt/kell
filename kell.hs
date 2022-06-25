@@ -19,7 +19,8 @@ import Control.Monad.Trans.State.Lazy
 import System.Exit
 import System.Posix.Process
 import Text.Parsec
-import Text.Parsec 
+import Text.Parsec
+import qualified Data.List as L
 import qualified Data.Text as Txt
 import TokParser
 import Text.Parsec.Error(Message(..))
@@ -39,13 +40,12 @@ cmdPrompt curCmd = do
   if curCmd == "" then continuePrompt
   else if last curCmd == '\\' then incomplete $ init curCmd 
   else case toks of (Right v) -> case parse2AST v of (Right ast) -> runPipe ast >> continuePrompt
-                                                     (Left e)    -> handleErrs e
-                    (Left e) -> handleErrs e
-  where parse2AST = parse parseToks "charstream"
-        toks      = parse lexer "tokenstream" curCmd
+                                                     (Left e)    -> handleErrs "EOF" e
+                    (Left e) -> handleErrs "eof" e
+  where parse2AST = parse parseToks "tokenstream"
+        toks      = parse lexer "charstream" curCmd
         incomplete str = printPrompt "$PS2" >> lift getLine >>= (cmdPrompt . (str++))
         continuePrompt = printPrompt "$PS1" >> lift getLine >>= cmdPrompt
-        handleErrs e = if "eof" `elem` (messageString <$> errorMessages e) then incomplete (curCmd ++ "\n")
-                       else (lift $ print e ) >> continuePrompt
---main = getLine >>= print . parse lexer "stdin" --"stdin" "check if \n newline is \" accureately #\n rep#resented \n\""
--- . parse parseToks "tokenstream" . (\(Right w)-> w) . 
+	-- FIXME no line extension on echo >\n
+        handleErrs eofT e = if eofT `elem` (messageString <$> errorMessages e) then incomplete (curCmd ++ "\n")
+                            else (lift $ print e ) >> continuePrompt
