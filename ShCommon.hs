@@ -22,7 +22,9 @@ module ShCommon(
   escape,
   quoteEsc,
   dQuote,
-  getDollarExp
+  getDollarExp,
+  b2I,
+  fE
 )
 where
 import Data.Stack
@@ -127,3 +129,9 @@ putVar name newval = do
   where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (shFMode curEnv)
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
                                                     _               -> (newval, False)
+
+b2I :: (Bool -> Bool -> Bool) -> (Int -> Int -> Int)
+b2I f i1 i2 = fromEnum $ f (i1>0) (i2>0)
+
+fE :: (Int -> Int -> Bool) -> (Int -> Int -> Int)
+fE  f i1 i2 = fromEnum $ f i1     i2

@@ -15,6 +15,7 @@ module Exec
 (
  runPipe,
  runSmpCmd,
+ runAndOr,
  getDefaultShellEnv,
  expandWord,
  expandNoSplit,
@@ -25,7 +26,7 @@ module Exec
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, Redirect(..))
+import TokParser (SmpCmd(..), Pipeline, AndOrList, Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -65,8 +66,7 @@ runPipe pipeline = if length pipeline == 1 then runSmpCmd . head $ pipeline else
   pipes          <- lift $ sequence [createPipe | n <- [1..length pipeline-1]]
   createChildren <- get >>= sequence . ( (lift . forkProcess) <$>) . (finalActions pipes)
   lift $ sequence ((\(fd1,fd2) -> closeFd fd1 >> closeFd fd2) <$> pipes)
-  exitCode       <- waitToExitCode . last $ createChildren -- ksh style ...
-  return ExitSuccess
+  waitToExitCode . last $ createChildren -- ksh style ...
   where fds = [createPipe | n <- [1..((length pipeline)-1)]]
         doRedMid ((in1,out1), (in2,out2)) = do
           dupTo in1 stdInput
@@ -76,6 +76,16 @@ runPipe pipeline = if length pipeline == 1 then runSmpCmd . head $ pipeline else
         doRedEnd (inFd,outFd) = dupTo inFd stdInput   >> closeFd outFd >> closeFd inFd
         createRedL pL = [doRedBeg (head pL)] ++ (doRedMid <$> (\l -> zip l $ tail l) pL) ++ [doRedEnd (last pL)]
         finalActions ps ev = zipWith (\redirs pipeA -> redirs >> evalStateT (runSmpCmd pipeA) ev >> return () ) (createRedL ps) pipeline
+
+runAndOr :: AndOrList -> Shell ExitCode
+runAndOr [(pipe,EOF)] = runPipe pipe
+runAndOr andOrL = case head andOrL of (p,AND_IF) -> runPipe p >>= dropIf (/=ExitSuccess)
+                                      (p,OR_IF)  -> runPipe p >>= dropIf (==ExitSuccess)
+    where dropIf cond ec = if cond ec then 
+                                 if rest andOrL /= []  then runAndOr $ rest andOrL
+                                 else return ec
+                               else runAndOr $ tail andOrL
+          rest = tail . dropWhile (( == (snd $ head andOrL)) . snd)
 
 getDefaultShellEnv :: IO ShellEnv
 getDefaultShellEnv = do

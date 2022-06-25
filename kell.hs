@@ -39,13 +39,13 @@ cmdPrompt curCmd = do
   --lift $ print toks
   if curCmd == "" then continuePrompt
   else if last curCmd == '\\' then incomplete $ init curCmd 
-  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runPipe ast >> continuePrompt
+  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runAndOr ast >>= lift . print >> continuePrompt
                                                      (Left e)    -> handleErrs "EOF" e
                     (Left e) -> handleErrs "eof" e
   where parse2AST = parse parseToks "tokenstream"
         toks      = parse lexer "charstream" curCmd
         incomplete str = printPrompt "$PS2" >> lift getLine >>= (cmdPrompt . (str++))
         continuePrompt = printPrompt "$PS1" >> lift getLine >>= cmdPrompt
-	-- FIXME no line extension on echo >\n
+        -- FIXME no line extension on echo >\n
         handleErrs eofT e = if eofT `elem` (messageString <$> errorMessages e) then incomplete (curCmd ++ "\n")
                             else (lift $ print e ) >> continuePrompt

@@ -16,7 +16,7 @@ module TokParser
   parseToks,
   parseSmpCmd,
   TokParser,
-  SmpCmd, Pipeline,
+  SmpCmd, Pipeline, AndOrList,
   cmdWords,
   assign,
   Redirect(Redirect),
@@ -158,8 +158,8 @@ parseSepList = replaceLast <$> parseList False seps parseAndOrList <*> (lastSep 
         seps = [SEMI, Ampersand]
         lastSep = oneOfOp seps
 
-parseToks :: TokParser Pipeline
-parseToks = parsePipe >>= (\pipe -> (eof <|> op EOF) >> return pipe)
+parseToks :: TokParser AndOrList
+parseToks = parseAndOrList >>= (\andor -> (eof <|> op EOF) >> return andor)
 
 parseCmd :: TokParser SmpCmd
 parseCmd  = parseSmpCmd  >>= (\smpCmd  -> (eof <|> op EOF) >> return smpCmd)
