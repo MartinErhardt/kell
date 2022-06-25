@@ -36,6 +36,7 @@ launchCmdSub :: (String -> Shell ExitCode) -> String -> Shell String
 launchCmdSub launcher cmd = do
   pipe      <- lift createPipe
   curEnv    <- get
+  lift $ print cmd
   forkedPId <- lift . forkProcess $ do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
@@ -115,7 +116,7 @@ execExp :: (String -> Shell ExitCode) -> ExpTok -> Shell [Field]
 execExp launcher (ExpTok NoExp _ s) = return [s]
 execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub launcher s
                                                 ParamExp -> expandParams s
-                                                ArithExp -> expandArith s
+                                                ArithExp -> expandNoSplit launcher s >>= expandArith
                          >>= return . (\(Right v) -> v) . parse escapeUnorigQuotes "EscapeUnorigQuotes"
                          >>= if split then fieldExpand else return . (:[])
 
