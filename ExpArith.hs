@@ -30,7 +30,8 @@ import qualified Text.Parsec.Token as Tok
 import qualified Text.Read as Rd
 
 type AParser a = ParsecT String () Shell a
-
+uOpMap = [[("~", complement)]
+         ,[("!", fromEnum . not . (>0) )] ]
 bOpMap = [[("*",  (*))]
          ,[("/",  div)]
          ,[("%",  mod)]
@@ -52,7 +53,8 @@ bOpMap = [[("*",  (*))]
 
 lexer :: Tok.GenTokenParser String () Shell
 lexer = Tok.makeTokenParser style
-  where ops = concat . fst . unzip $ (unzip <$> bOpMap)
+  where bOps = concat . fst . unzip $ (unzip <$> bOpMap)
+        uOps = concat . fst . unzip $ (unzip <$> uOpMap)
         style = Lang.emptyDef
          {Tok.commentStart    = ""
          ,Tok.commentEnd      = ""
@@ -60,8 +62,8 @@ lexer = Tok.makeTokenParser style
          ,Tok.identStart      = letter   <|> char '_'
          ,Tok.identLetter     = alphaNum <|> char '_'
          ,Tok.opStart         = Tok.opLetter style
-         ,Tok.opLetter        = oneOf (concat ops)
-         ,Tok.reservedOpNames = ops
+         ,Tok.opLetter        = oneOf (concat $ bOps ++ uOps)
+         ,Tok.reservedOpNames = bOps++uOps
          ,Tok.reservedNames   = []
          ,Tok.caseSensitive   = True
          }
@@ -78,10 +80,13 @@ getVal name = (lift . getVar) name >>= handleVar
 getVarVal :: AParser Int
 getVarVal = Tok.identifier lexer >>= getVal
 
+getOp :: (String, a) -> AParser a
+getOp (op, f) = Tok.reservedOp lexer op >> return f
+
 assign :: AParser Int
 assign = do
   toAssign <- Tok.identifier lexer
-  opFunc   <- (foldl1 (<|>) ((\(op,f) -> Tok.reservedOp lexer op >> return f) <$> assignOps))
+  opFunc   <- (foldl1 (<|>) (getOp <$> assignOps))
   oldval   <- getVal toAssign
   newval   <- expr >>= return . opFunc oldval
   lift $ putVar toAssign (show $ newval)
@@ -94,8 +99,7 @@ baseExpr = Tok.parens lexer expr <|> try(assign) <|> getVarVal <|> numb
 
 expr :: AParser Int
 expr = Ex.buildExpressionParser table baseExpr
-  where infixOp x f = Ex.Infix (Tok.reservedOp lexer x >> return f) Ex.AssocLeft
-        table = ((uncurry infixOp) <$>) <$> bOpMap
+  where table =( (((flip Ex.Infix $ Ex.AssocLeft) . getOp)  <$>) <$> bOpMap) ++ (((Ex.Prefix . getOp) <$>) <$> uOpMap)
 
 parseExpr :: AParser Int
 parseExpr = do
