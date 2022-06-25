@@ -65,9 +65,10 @@ parseWord = (eof       >>            return "" )
         <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" ) <*> (parseWord <|> return "") ) )
         <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" ) <*> (parseWord <|> return "") ) )
         <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"") <*> (parseWord <|> return "") ) )
-        <|> (char '$'  >> ((++) . ("$"++)  <$> getDollarExp id stackNew          <*> (parseWord <|> return "") ) )-- word expansion
+        <|> (char '$'  >> ((++) . ("$"++)  <$> getDollarStr                      <*> (parseWord <|> return "") ) )-- word expansion
         <|> (             ((++) . (:[]))   <$> noneOf forbidden                  <*> (parseWord <|> return "") )-- parse letter
   where forbidden = ((head . fst) <$> reservedOps) ++ " "
+        getDollarStr = getDollarExp id stackNew <|> return ""
 
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])
