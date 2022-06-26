@@ -16,7 +16,7 @@ module TokParser
   parseToks,
   parseSmpCmd,
   TokParser,
-  SmpCmd, Pipeline, AndOrList,
+  SmpCmd, Pipeline, AndOrList, SepList,
   cmdWords,
   assign,
   Redirect(Redirect),
@@ -138,28 +138,27 @@ parseSmpCmd = addRedirect <$> try(parseIORed) <*> (parseSmpCmd <|> base)
                      <|> addWord     <$> getWord         <*> parseSmpCmdSuf
                      <|> base
 
-parseList :: Bool -> [Token] -> TokParser a -> TokParser [(a,Token)]
-parseList nLs sepToks parseElem = parseElem >>= (\e -> recList e <|> return [(e,EOF)] )
+parseList :: (a -> TokParser [(a,Token)]) -> Bool -> [Token] -> TokParser a -> TokParser [(a,Token)]
+parseList endCondition nLs sepToks parseElem = parseElem >>= (\e -> try(recList e) <|> endCondition e )
   where recList elem = do
           sep  <- oneOfOp sepToks
           if nLs then newlineList else return ()
-          rest <- parseList nLs sepToks parseElem
+          rest <- parseList endCondition nLs sepToks parseElem
           return $ [(elem,sep)] ++ rest
 
 parsePipe :: TokParser Pipeline
-parsePipe = (fst <$>) <$> parseList True [PIPE] parseSmpCmd
+parsePipe = (fst <$>) <$> parseList (\e -> return [(e,EOF)]) True [PIPE]          parseSmpCmd
 
 parseAndOrList :: TokParser AndOrList
-parseAndOrList = parseList True [AND_IF, OR_IF] parsePipe
+parseAndOrList =          parseList (\e -> return [(e,EOF)]) True [AND_IF, OR_IF] parsePipe
 
 parseSepList :: TokParser SepList
-parseSepList = replaceLast <$> parseList False seps parseAndOrList <*> (lastSep <|> return EOF)
-  where replaceLast l tok = tail l ++ [(fst . last $ l, tok)]
-        seps = [SEMI, Ampersand]
+parseSepList = parseList (\e -> (oneOfOp seps >>= return . (:[]) . ((,) e) ) <|> return [(e,EOF)]) False seps parseAndOrList
+  where seps = [SEMI, Ampersand]
         lastSep = oneOfOp seps
 
-parseToks :: TokParser AndOrList
-parseToks = parseAndOrList >>= (\andor -> (eof <|> op EOF) >> return andor)
+parseToks :: TokParser SepList
+parseToks = parseSepList >>= (\sepL -> (eof <|> op EOF) >> return sepL)
 
 parseCmd :: TokParser SmpCmd
 parseCmd  = parseSmpCmd  >>= (\smpCmd  -> (eof <|> op EOF) >> return smpCmd)

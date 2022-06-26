@@ -13,12 +13,9 @@
 --   limitations under the License.
 module Exec
 (
- runPipe,
- runSmpCmd,
- runAndOr,
+ runPipe, runSmpCmd, runAndOr, runSepList,
  getDefaultShellEnv,
- expandWord,
- expandNoSplit,
+ expandWord, expandNoSplit,
  execCmd,
  Shell,
  getVar
@@ -26,7 +23,7 @@ module Exec
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, AndOrList, Redirect(..))
+import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -86,6 +83,13 @@ runAndOr andOrL = case head andOrL of (p,AND_IF) -> runPipe p >>= dropIf (/=Exit
                                  else return ec
                                else runAndOr $ tail andOrL
           rest = tail . dropWhile (( == (snd $ head andOrL)) . snd)
+
+runSepList :: SepList -> Shell ExitCode
+runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> return ExitSuccess >>= continueWith sepL
+                                    (andOrL, _)         -> runAndOr andOrL >>= continueWith sepL
+   --TODO store PID in ShellEnv; close stdInput in async child
+  where runAsync andOrL = get >>= lift . forkProcess . (>> return ()) . evalStateT (runAndOr andOrL)
+        continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
 getDefaultShellEnv :: IO ShellEnv
 getDefaultShellEnv = do

@@ -39,7 +39,7 @@ cmdPrompt curCmd = do
   --lift $ print toks
   if curCmd == "" then continuePrompt
   else if last curCmd == '\\' then incomplete $ init curCmd 
-  else case toks of (Right v) -> case parse2AST v of (Right ast) -> runAndOr ast >>= lift . print >> continuePrompt
+  else case toks of (Right v) -> case parse2AST v of (Right ast) -> (lift $ print ast) >> runSepList ast >>= lift . print >> continuePrompt
                                                      (Left e)    -> handleErrs "EOF" e
                     (Left e) -> handleErrs "eof" e
   where parse2AST = parse parseToks "tokenstream"
