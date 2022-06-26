@@ -36,6 +36,7 @@ import System.Posix.IO
 import System.Posix.Types(Fd(..))
 import qualified Data.Map as Map
 import Control.Monad
+import Data.Functor
 
 data Redirect = Redirect Token Fd String deriving (Eq,Show)
 data SmpCmd = SmpCmd { redirects ::  [Redirect]
@@ -73,15 +74,15 @@ getToken :: String -> Maybe Token
 getToken str = Map.lookup str (Map.fromList reservedWords) 
 
 getWord :: TokParser String
-getWord = tokenPrim show nextPosW ((>>= checkIfRes) <$> testWord)
-  where checkIfRes w = if w `elem` (fst <$> reservedWords) then Nothing else Just w
+getWord = tokenPrim show nextPosW ((>>= checkIfRes) . testWord)
+  where checkIfRes w = guard (not $ w `elem` (fst <$> reservedWords)) $> w
 
 oneOfOp :: [Token] -> TokParser Token
 oneOfOp ops = tokenPrim show nextPosTok checkTok
-  where checkTok tok = if tok `elem` ops then Just tok else Nothing
+  where checkTok tok = guard (tok `elem` ops) $> tok
 
 getAssignWord :: TokParser (String,String)
-getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) <$> testWord)
+getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) . testWord)
   where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
           where c2Maybe res = case res of Right t  -> Just t
                                           Left _   -> Nothing
@@ -91,13 +92,13 @@ getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) <$> testWord)
           where rest = (eof >> return "") <|> (++) . (:[]) <$> anyChar <*> rest
 
 getIONr :: TokParser Int
-getIONr = tokenPrim show nextPosW (\w -> testWord w >>= Rd.readMaybe)
+getIONr = tokenPrim show nextPosW ((>>= Rd.readMaybe) . testWord)
 
 getOp :: TokParser Token
 getOp = tokenPrim show nextPosTok testOp
 
 op :: Token -> TokParser ()
-op tok = tokenPrim show nextPosTok (\t -> if t == tok then Just () else Nothing)
+op tok = tokenPrim show nextPosTok (guard . (== tok))
 
 parseIORed :: TokParser Redirect
 parseIORed = ((\op -> Redirect op (getDefOp op) ) <$> getRedirOp <*> getWord) <|> do
@@ -115,7 +116,7 @@ parseIORed = ((\op -> Redirect op (getDefOp op) ) <$> getRedirOp <*> getWord) <|
                     ,(GREATAND, stdOutput)
                     ,(LESSGREAT,stdInput)]
         getDefOp = (\(Just v) -> v) . (flip Map.lookup) (Map.fromList defaultFd)
-        isRedirOp tok = if tok `elem` (fst <$> defaultFd) then Just tok else Nothing
+        isRedirOp tok = guard (tok `elem` (fst <$> defaultFd)) $> tok
 
 newLnList :: TokParser ()
 newLnList = (tokenPrim show nextPosTok getNewline >> newLnList) <|> return ()

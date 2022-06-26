@@ -108,7 +108,7 @@ parseExps doFExps names = (eof >> return [])
                                                   <|> (anyChar >>= return . (['\\']++) . (:[]) ) ) ) ) (char '`' >> return "")
         getVExp :: [String] -> Parser String
         getVExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
-        getExp begin end = try( string begin) >> (quote $ getDollarExp (\_ -> "") (stackPush stackNew end) )
+        getExp begin end = try( string begin) >> (quote $ getDollarExp (const "") (stackPush stackNew end) )
         processDQuote = enc (ExpTok NoExp False "\"") . (\(Right v) -> v) . parse (parseExps False names) "qE"
 
 execExp :: (String -> Shell ExitCode) -> ExpTok -> Shell [Field]
