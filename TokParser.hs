@@ -11,6 +11,7 @@
 --   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 --   See the License for the specific language governing permissions and
 --   limitations under the License.
+{-# LANGUAGE TupleSections #-}
 module TokParser
 (
   parseToks,
@@ -34,6 +35,7 @@ import Data.Maybe
 import System.Posix.IO
 import System.Posix.Types(Fd(..))
 import qualified Data.Map as Map
+import Control.Monad
 
 data Redirect = Redirect Token Fd String deriving (Eq,Show)
 data SmpCmd = SmpCmd { redirects ::  [Redirect]
@@ -43,9 +45,6 @@ data SmpCmd = SmpCmd { redirects ::  [Redirect]
 --data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
 --data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
 
---data AndOr = AndOR AndSep  | OrSep  deriving(Enum)
---data Sep   = Sep   SemiSep | AmpSep deriving(Enum)
-
 type Pipeline  = [SmpCmd]
 type AndOrList = [(Pipeline, Token)] -- Last Token has no meaning
 type SepList   = [(AndOrList,Token)]
@@ -53,14 +52,14 @@ type SepList   = [(AndOrList,Token)]
 type TokParser = Parsec [Token] ()
 
 testWord :: Token -> Maybe String
-testWord tok = case tok of (Word w) -> Just w
-                           _        -> Nothing
+testWord tok = case tok of Word w -> Just w
+                           _      -> Nothing
 testOp :: Token -> Maybe Token
-testOp tok = case tok of (Word w) -> Nothing
+testOp tok = case tok of Word w   -> Nothing
                          NEWLINE  -> Nothing
                          EOF      -> Nothing
                          t        -> Just t
-
+--TODO should parse [(Token,SourcePos)] stream that remembers position in original soource
 nextPosW pos (Word w) xs  = incSourceColumn pos (length w +1)
 nextPosTok pos x xs  = incSourceColumn pos 1
 
@@ -74,24 +73,21 @@ getToken :: String -> Maybe Token
 getToken str = Map.lookup str (Map.fromList reservedWords) 
 
 getWord :: TokParser String
-getWord = tokenPrim show nextPosW (\w -> testWord w >>= (\w -> if w `elem` (fst <$> reservedWords) then Nothing else Just w))
+getWord = tokenPrim show nextPosW ((>>= checkIfRes) <$> testWord)
+  where checkIfRes w = if w `elem` (fst <$> reservedWords) then Nothing else Just w
 
 oneOfOp :: [Token] -> TokParser Token
-oneOfOp ops = tokenPrim show nextPosTok (\tok -> if tok `elem` ops then Just tok else Nothing )
+oneOfOp ops = tokenPrim show nextPosTok checkTok
+  where checkTok tok = if tok `elem` ops then Just tok else Nothing
 
 getAssignWord :: TokParser (String,String)
-getAssignWord = tokenPrim show nextPosW (\w -> testWord w >>= isAssignWord)
-  where isAssignWord = c2Maybe . (parse parseAssignWord "string")
-          where c2Maybe res = case res of (Right t)  -> Just t
-                                          (Left _)   -> Nothing
+getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) <$> testWord)
+  where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
+          where c2Maybe res = case res of Right t  -> Just t
+                                          Left _   -> Nothing
         parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> parseNameRest
           where parseNameRest = ((++) . (:[]) <$> (letter <|> char '_' <|> digit) <*> parseNameRest) <|> return ""
-        parseAssignWord :: Parser ((String,String))
-        parseAssignWord = do
-          name <- parseXBDName
-          char '='
-          toAssign <- rest
-          return (name,toAssign)
+        parseAssignWord = (,) <$> parseXBDName <* char '=' <*> rest
           where rest = (eof >> return "") <|> (++) . (:[]) <$> anyChar <*> rest
 
 getIONr :: TokParser Int
@@ -104,12 +100,12 @@ op :: Token -> TokParser ()
 op tok = tokenPrim show nextPosTok (\t -> if t == tok then Just () else Nothing)
 
 parseIORed :: TokParser Redirect
-parseIORed = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord) <|> do
+parseIORed = ((\op -> Redirect op (getDefOp op) ) <$> getRedirOp <*> getWord) <|> do
   n       <- getIONr
   redirOp <- getRedirOp
   file    <- getWord
   return $ Redirect redirOp (Fd . fromIntegral $ n) file
-  where getRedirOp = tokenPrim show nextPosTok (\o -> testOp o >>= isRedirOp)
+  where getRedirOp = tokenPrim show nextPosTok ((>>= isRedirOp) <$> testOp)
         defaultFd = [(LESS,     stdInput)
                     ,(GREAT,    stdOutput)
                     ,(CLOBBER,  stdOutput)
@@ -121,44 +117,44 @@ parseIORed = ((\op w -> Redirect op (getDefOp op) w) <$> getRedirOp <*> getWord)
         getDefOp = (\(Just v) -> v) . (flip Map.lookup) (Map.fromList defaultFd)
         isRedirOp tok = if tok `elem` (fst <$> defaultFd) then Just tok else Nothing
 
-newlineList :: TokParser ()
-newlineList = (tokenPrim show nextPosTok getNewline >> newlineList) <|> return ()
+newLnList :: TokParser ()
+newLnList = (tokenPrim show nextPosTok getNewline >> newLnList) <|> return ()
   where getNewline w = case w of NEWLINE -> Just ()
                                  _       -> Nothing
 
 parseSmpCmd :: TokParser SmpCmd
-parseSmpCmd = addRedirect <$> try(parseIORed) <*> (parseSmpCmd <|> base)
-          <|> addAssign   <$> getAssignWord   <*> (parseSmpCmd <|> base)
-          <|> addWord     <$> getWord         <*>  parseSmpCmdSuf
+parseSmpCmd = addRedirect <$> try parseIORed <*> (parseSmpCmd <|> base)
+          <|> addAssign   <$> getAssignWord  <*> (parseSmpCmd <|> base)
+          <|> addWord     <$> getWord        <*>  parseSmpCmdSuf
   where base = return $ SmpCmd [] [] []
-        addRedirect redir cmd = SmpCmd ([redir] ++ redirects cmd) (assign cmd)             (cmdWords cmd)
-        addAssign strstr cmd =  SmpCmd (redirects cmd)            ([strstr] ++ assign cmd) (cmdWords cmd)
-        addWord str cmd =       SmpCmd (redirects cmd)            (assign cmd)             ([str] ++ cmdWords cmd)
-        parseSmpCmdSuf = addRedirect <$> try(parseIORed) <*> parseSmpCmdSuf
-                     <|> addWord     <$> getWord         <*> parseSmpCmdSuf
+        addRedirect redir cmd = cmd {redirects = [redir]  ++ redirects cmd}
+        addAssign strstr cmd =  cmd {assign    = [strstr] ++ assign cmd   }
+        addWord str cmd =       cmd {cmdWords  = [str]    ++ cmdWords cmd }
+        parseSmpCmdSuf = addRedirect <$> try parseIORed <*> parseSmpCmdSuf
+                     <|> addWord     <$> getWord        <*> parseSmpCmdSuf
                      <|> base
 
-parseList :: (a -> TokParser [(a,Token)]) -> Bool -> [Token] -> TokParser a -> TokParser [(a,Token)]
-parseList endCondition nLs sepToks parseElem = parseElem >>= (\e -> try(recList e) <|> endCondition e )
-  where recList elem = do
-          sep  <- oneOfOp sepToks
-          if nLs then newlineList else return ()
-          rest <- parseList endCondition nLs sepToks parseElem
-          return $ [(elem,sep)] ++ rest
+parseList :: (a -> TokParser (a,Token)) -> Bool -> [Token] -> TokParser a -> TokParser [(a,Token)]
+parseList endCondition nLs sepToks parseElem = parseElem 
+  >>= (<|>) <$> try . recList <*> ((:[]) <$>) . endCondition
+  where rest = parseList endCondition nLs sepToks parseElem
+        addE elem sep = ([(elem,sep)] ++)
+        recList elem = addE elem <$> oneOfOp sepToks <* when nLs newLnList <*> rest
 
 parsePipe :: TokParser Pipeline
-parsePipe = (fst <$>) <$> parseList (\e -> return [(e,EOF)]) True [PIPE]          parseSmpCmd
+parsePipe = (fst <$>) <$> parseList (return . (,EOF)) True [PIPE]          parseSmpCmd
 
 parseAndOrList :: TokParser AndOrList
-parseAndOrList =          parseList (\e -> return [(e,EOF)]) True [AND_IF, OR_IF] parsePipe
+parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
 
 parseSepList :: TokParser SepList
-parseSepList = parseList (\e -> (oneOfOp seps >>= return . (:[]) . ((,) e) ) <|> return [(e,EOF)]) False seps parseAndOrList
-  where seps = [SEMI, Ampersand]
+parseSepList = parseList endCondition False seps parseAndOrList
+  where endCondition e = ((e,) <$> oneOfOp seps) <|> return (e,EOF)
+        seps = [SEMI, Ampersand]
         lastSep = oneOfOp seps
 
 parseToks :: TokParser SepList
-parseToks = parseSepList >>= (\sepL -> (eof <|> op EOF) >> return sepL)
+parseToks = parseSepList <* (eof <|> op EOF)
 
 parseCmd :: TokParser SmpCmd
-parseCmd  = parseSmpCmd  >>= (\smpCmd  -> (eof <|> op EOF) >> return smpCmd)
+parseCmd  = parseSmpCmd  <* (eof <|> op EOF)
