@@ -23,7 +23,7 @@ module Exec
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Redirect(..))
+import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), IfClause(..), Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -58,8 +58,20 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         execRedirects = if redirects cmd /= [] then foldl1 (>>) (doRedirect <$> (redirects cmd)) else return ()
         execLocal = execAssigns >> execRedirects >> (return ExitSuccess)
 
+runIfClause :: IfClause -> Shell ExitCode
+runIfClause cl = do
+  res <- runSepList . fst . head $ clauses cl
+  if res == ExitSuccess then runSepList . snd . head $ clauses cl
+  else if (length . clauses) cl/= 1 then (runIfClause    $ cl{ clauses = tail $ clauses cl})
+  else case else_part cl of Just body -> runSepList body
+                            Nothing   -> return ExitSuccess
+
+runCmd :: Cmd -> Shell ExitCode
+runCmd (SCmd cmd)     = runSmpCmd cmd
+runCmd (ICmd cmd) = runIfClause cmd
+
 runPipe :: Pipeline -> Shell ExitCode
-runPipe pipeline = if length pipeline == 1 then runSmpCmd . head $ pipeline else do
+runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
   pipes          <- lift $ sequence [createPipe | n <- [1..length pipeline-1]]
   createChildren <- get >>= sequence . ( (lift . forkProcess) <$>) . (finalActions pipes)
   lift $ sequence ((\(fd1,fd2) -> closeFd fd1 >> closeFd fd2) <$> pipes)
@@ -72,7 +84,7 @@ runPipe pipeline = if length pipeline == 1 then runSmpCmd . head $ pipeline else
         doRedBeg (inFd,outFd) = dupTo outFd stdOutput >> closeFd inFd  >> closeFd outFd
         doRedEnd (inFd,outFd) = dupTo inFd stdInput   >> closeFd outFd >> closeFd inFd
         createRedL pL = [doRedBeg (head pL)] ++ (doRedMid <$> (\l -> zip l $ tail l) pL) ++ [doRedEnd (last pL)]
-        finalActions ps ev = zipWith (\redirs pipeA -> redirs >> evalStateT (runSmpCmd pipeA) ev >> return () ) (createRedL ps) pipeline
+        finalActions ps ev = zipWith (\redirs pipeA -> redirs >> evalStateT (runCmd pipeA) ev >> return () ) (createRedL ps) pipeline
 
 runAndOr :: AndOrList -> Shell ExitCode
 runAndOr [(pipe,EOF)] = runPipe pipe

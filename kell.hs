@@ -48,5 +48,6 @@ cmdPrompt curCmd = do
         incomplete str = printPrompt "$PS2" >> lift getLine >>= (cmdPrompt . (str++))
         continuePrompt = printPrompt "$PS1" >> lift getLine >>= cmdPrompt
         -- FIXME no line extension on echo >\n
-        handleErrs eofT e = if eofT `elem` (messageString <$> errorMessages e) then incomplete (curCmd ++ "\n")
+        handleErrs eofT e = if [eofT,""] `L.intersect` (messageString <$> errorMessages e) /= []
+                              then incomplete (curCmd ++ "\n")
                             else (lift $ print e ) >> continuePrompt

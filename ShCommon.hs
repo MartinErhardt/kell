@@ -106,7 +106,7 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                         ,("}",   closingAction s "}")]
         stackHandler (str, (Just a)) = (try $ string str) >> if stackIsEmpty a then return $ f str
                                                              else quote (getDollarExp f a) >>= return . (str++)
-        stackHandler (str, Nothing) = fail ""
+        stackHandler (str, Nothing) = fail $ "no" ++ str
 
 data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
                       -- , func :: Map.Map String String
