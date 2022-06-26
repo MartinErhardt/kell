@@ -65,7 +65,7 @@ testOp tok = case tok of Word w   -> Nothing
                          NEWLINE  -> Nothing
                          EOF      -> Nothing
                          t        -> Just t
---TODO should parse [(Token,SourcePos)] stream that remembers position in original soource
+--TODO should parse [(Token,SourcePos)] stream that remembers position in original source
 nextPosW pos (Word w) xs  = incSourceColumn pos (length w +1)
 nextPosTok pos x xs  = incSourceColumn pos 1
 
@@ -140,9 +140,7 @@ parseIORed = ((\op -> Redirect op (getDefOp op) ) <$> getRedirOp <*> getWord) <|
         isRedirOp tok = guard (tok `elem` (fst <$> defaultFd)) $> tok
 
 newLnList :: TokParser ()
-newLnList = (tokenPrim show nextPosTok getNewline >> newLnList) <|> return ()
-  where getNewline w = case w of NEWLINE -> Just ()
-                                 _       -> Nothing
+newLnList = (tokenPrim show nextPosTok (guard . (==NEWLINE)) >> newLnList) <|> return ()
 
 parseSmpCmd :: TokParser SmpCmd
 parseSmpCmd = addRedirect <$> try parseIORed <*> (parseSmpCmd <|> base)
@@ -173,8 +171,8 @@ parseAndOrList :: TokParser AndOrList
 parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
 
 parseSepList :: Bool -> [Token] -> TokParser SepList
-parseSepList nLs seps = parseList endCondition False seps parseAndOrList
-  where endCondition e = ((e,) <$> oneOfOp seps) <|> return (e,EOF)
+parseSepList nLs seps = parseList endCondition nLs seps parseAndOrList
+  where endCondition e = ((e,) <$> oneOfOp seps <* when nLs newLnList) <|> return (e,EOF)
         lastSep = oneOfOp seps
 
 parseCmpList :: TokParser SepList
