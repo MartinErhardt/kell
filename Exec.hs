@@ -39,6 +39,7 @@ import System.Posix.IO
 import System.Posix.IO(OpenFileFlags(..))
 import System.IO
 import System.Exit
+import Control.Monad
 import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
@@ -51,12 +52,12 @@ import System.Exit
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord execCmd True <$> cmdWords cmd)
-                  if allFields /= [] then launchCmd (head allFields) (tail allFields) (execAssigns >> execRedirects)
-                  else execLocal
-                else execLocal
-  where execAssigns =   if assign cmd    /= [] then foldl1 (>>) (doAssign   <$> (assign cmd))    else return ()
-        execRedirects = if redirects cmd /= [] then foldl1 (>>) (doRedirect <$> (redirects cmd)) else return ()
-        execLocal = execAssigns >> execRedirects >> (return ExitSuccess)
+                  if allFields /= [] then launchCmd (head allFields) (tail allFields) (prep ())
+                  else prep ExitSuccess
+                else prep ExitSuccess
+  where execAssigns =   when (assign    cmd /= []) ( foldl1 (>>) (doAssign   <$> (assign cmd))    >> return () )
+        execRedirects = when (redirects cmd /= []) ( foldl1 (>>) (doRedirect <$> (redirects cmd)) >> return () )
+        prep arg = execAssigns >> execRedirects >> return arg
 
 runIfClause :: IfClause -> Shell ExitCode
 runIfClause cl = do
@@ -140,22 +141,23 @@ launchCmd cmd args prepare = do
 doAssign :: (String,String) -> Shell ()
 doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 
-change2Fd fd newFd = dupTo newFd fd >> closeFd newFd
-
-doRedirect :: Redirect -> Shell ()
+doRedirect :: Redirect -> Shell (IO Fd)
 doRedirect (Redirect tok fd path) = do expandedPath <- expandNoSplit execCmd path
                                        get >>= lift . (getAction tok fd expandedPath) . shFMode
-  where truncOFlag  = (OpenFileFlags False False False False True)
-        noFlag      = (OpenFileFlags False False False False False)
-        appendOFlag = (OpenFileFlags True  False False False False)
+  where truncOFlag   = (OpenFileFlags False False False False True)
+        noFlag       = (OpenFileFlags False False False False False)
+        appendOFlag  = (OpenFileFlags True  False False False False)
+        change2Fd fd = (<*) <$> (flip dupTo) fd <*> closeFd
+        restoreOpen fd action = dup fd <* (action >>= change2Fd fd) >>= return . (change2Fd fd)
+        str2Fd = Fd . fromIntegral . Rd.read
         -- handle Redirection errors
-        redirAction = [(LESS,      (\fd path m -> openFd path ReadOnly  (Just m) noFlag      >>= change2Fd fd))
-                      ,(GREAT,     (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= change2Fd fd)) --TODO case file exists and noclobber opt
-                      ,(CLOBBER,   (\fd path m -> openFd path WriteOnly (Just m) truncOFlag  >>= change2Fd fd))
-                      ,(DGREAT,    (\fd path m -> openFd path WriteOnly (Just m) appendOFlag >>= change2Fd fd))
+        redirAction = [(LESS,      (\fd path m -> restoreOpen fd (openFd path ReadOnly  (Just m) noFlag      )))
+                      ,(GREAT,     (\fd path m -> restoreOpen fd (openFd path WriteOnly (Just m) truncOFlag  ))) --TODO case file exists and noclobber opt
+                      ,(CLOBBER,   (\fd path m -> restoreOpen fd (openFd path WriteOnly (Just m) truncOFlag  )))
+                      ,(DGREAT,    (\fd path m -> restoreOpen fd (openFd path WriteOnly (Just m) appendOFlag )))
                       -- TODO DLESS
-                      ,(LESSGREAT, (\fd path m -> openFd path ReadWrite (Just m) noFlag      >>= change2Fd fd))
-                      ,(LESSAND,   (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) >> return () ) )
-                      ,(GREATAND,  (\fd1 fd2 m -> dupTo fd1 (Fd . fromIntegral $ Rd.read fd2) >> return () ) )]
+                      ,(LESSGREAT, (\fd path m -> restoreOpen fd (openFd path ReadWrite (Just m) noFlag      )))
+                      ,(LESSAND,   (\fd1 fd2 m -> dupTo (str2Fd fd2) fd1 >>= return . ((flip dupTo) (str2Fd fd2)) ))
+                      ,(GREATAND,  (\fd1 fd2 m -> dupTo fd1 (str2Fd fd2) >>= return . dupTo fd ))]
         getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents
 
