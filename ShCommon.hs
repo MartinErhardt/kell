@@ -120,6 +120,8 @@ getVar name = get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
 
+-- infixl 4 <*>>; (<*>>) :: Monad m => m (a -> m b) -> (m a -> m b); mamb <*>> ma = join (mamb <*> ma)
+
 putVar :: String -> String -> Shell ()
 putVar name newval = do
   oldentry <- get >>= return . (Map.lookup name) . var

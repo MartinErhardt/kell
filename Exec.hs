@@ -23,7 +23,7 @@ module Exec
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), Redirect(..))
+import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), WhileLoop(..), Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -67,15 +67,21 @@ runIfClause cl = do
   else case else_part cl of Just body -> runSepList body
                             Nothing   -> return ExitSuccess
 
+runWhileLoop :: WhileLoop -> Shell ExitCode
+runWhileLoop (WhileLoop cond body) = runSepList cond >>= handler ExitSuccess
+  where handler bodyEC nextEC = if nextEC == ExitSuccess then restLoop else return bodyEC
+        restLoop = join $ handler <$> runSepList body <*> runSepList cond
+
 runCmd :: Cmd -> Shell ExitCode
 runCmd (SCmd cmd)        = runSmpCmd cmd
 runCmd (CCmd cmd redirs) = do
-  ioReversals <- foldl1 (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (doRedirect <$> redirs)
+  ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
   exitCode <- runCmpCmd cmd
   lift $ ioReversals >> return exitCode
 
 runCmpCmd :: CmpCmd -> Shell ExitCode
-runCmpCmd (IfCmp clause) = runIfClause clause
+runCmpCmd (IfCmp clause) = runIfClause  clause
+runCmpCmd (WhlCmp loop ) = runWhileLoop loop
 
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do

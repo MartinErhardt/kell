@@ -17,7 +17,7 @@ module TokParser
   parseToks,
   parseSmpCmd,
   TokParser,
-  Cmd(..), CmpCmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause,
+  Cmd(..), CmpCmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause, WhileLoop(..),
   clauses, else_part,
   cmdWords,
   assign,
@@ -47,9 +47,10 @@ data SmpCmd = SmpCmd { redirects ::  [Redirect]
 data IfClause = IfClause { clauses :: [(SepList, SepList)]
                          , else_part :: Maybe SepList
                          } deriving(Eq,Show)
+data WhileLoop = WhileLoop SepList SepList deriving(Eq,Show)
 data Cmd      = SCmd SmpCmd | CCmd CmpCmd [Redirect] deriving(Eq, Show)
 --data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
-data CmpCmd   = IfCmp IfClause deriving(Eq,Show)
+data CmpCmd   = IfCmp IfClause | WhlCmp WhileLoop deriving(Eq,Show)
 --data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
 
 type Pipeline  = [Cmd]
@@ -169,7 +170,8 @@ parseCmd :: TokParser Cmd
 parseCmd = (parseSmpCmd >>= return . SCmd) <|> CCmd <$> parseCmpCmd <*> many parseIORed
 
 parseCmpCmd :: TokParser CmpCmd
-parseCmpCmd = parseIfClause "if" >>= return . IfCmp
+parseCmpCmd = (parseIfClause "if" >>= return . IfCmp )
+          <|> (parseWhileLoop     >>= return . WhlCmp)
 
 parseAndOrList :: TokParser AndOrList
 parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
@@ -183,14 +185,17 @@ parseCmpList :: TokParser SepList
 parseCmpList = newLnList >> parseSepList True [SEMI,Ampersand,NEWLINE]
 
 parseIfClause :: String -> TokParser IfClause
-parseIfClause initKeyW = do
-  cond <- resWord initKeyW >> parseCmpList
-  body <- resWord "then"   >> parseCmpList
-  handler cond body
+parseIfClause initKeyW = join $ handler <$> (resWord initKeyW *> parseCmpList) <*> (resWord "then" *> parseCmpList)
   where appendElif condition body cl_elif = return $ cl_elif {clauses = [(condition, body)] ++ clauses cl_elif}
         handler cond body = (                  parseIfClause "elif" >>= appendElif cond body)
                         <|> (resWord "else" >> parseCmpList <* resWord "fi" >>= return . (IfClause [(cond, body)]) . Just)
                         <|> (resWord "fi"   >> (return $ IfClause [(cond,body)] Nothing) )
+
+parseWhileLoop :: TokParser WhileLoop
+parseWhileLoop = WhileLoop <$> (resWord "while" *> parseCmpList) <*> doGroup
+
+doGroup :: TokParser SepList
+doGroup = resWord "do" *> parseCmpList <* resWord "done"
 
 parseToks :: TokParser SepList
 parseToks = parseSepList False [SEMI,Ampersand] <* (eof <|> op EOF)
