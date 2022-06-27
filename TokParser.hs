@@ -17,7 +17,7 @@ module TokParser
   parseToks,
   parseSmpCmd,
   TokParser,
-  Cmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause,
+  Cmd(..), CmpCmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause,
   clauses, else_part,
   cmdWords,
   assign,
@@ -47,8 +47,9 @@ data SmpCmd = SmpCmd { redirects ::  [Redirect]
 data IfClause = IfClause { clauses :: [(SepList, SepList)]
                          , else_part :: Maybe SepList
                          } deriving(Eq,Show)
-data Cmd      = SCmd SmpCmd | ICmd IfClause deriving(Eq, Show)
+data Cmd      = SCmd SmpCmd | CCmd CmpCmd [Redirect] deriving(Eq, Show)
 --data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
+data CmpCmd   = IfCmp IfClause deriving(Eq,Show)
 --data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
 
 type Pipeline  = [Cmd]
@@ -162,10 +163,13 @@ parseList endCondition nLs sepToks parseElem = parseElem
         recList elem = addE elem <$> oneOfOp sepToks <* when nLs newLnList <*> rest
 
 parsePipe :: TokParser Pipeline
-parsePipe = (fst <$>) <$> parseList (return . (,EOF)) True [PIPE]          parseCmpCmd
+parsePipe = (fst <$>) <$> parseList (return . (,EOF)) True [PIPE]          parseCmd
 
-parseCmpCmd :: TokParser Cmd
-parseCmpCmd = (parseSmpCmd >>= return . SCmd) <|> (parseIfClause "if" >>= return . ICmd)
+parseCmd :: TokParser Cmd
+parseCmd = (parseSmpCmd >>= return . SCmd) <|> CCmd <$> parseCmpCmd <*> many parseIORed
+
+parseCmpCmd :: TokParser CmpCmd
+parseCmpCmd = parseIfClause "if" >>= return . IfCmp
 
 parseAndOrList :: TokParser AndOrList
 parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
@@ -191,5 +195,5 @@ parseIfClause initKeyW = do
 parseToks :: TokParser SepList
 parseToks = parseSepList False [SEMI,Ampersand] <* (eof <|> op EOF)
 
-parseCmd :: TokParser SmpCmd
-parseCmd  = parseSmpCmd  <* (eof <|> op EOF)
+-- parseSub :: TokParser SmpCmd
+-- parseSub  = parseSmpCmd  <* (eof <|> op EOF)

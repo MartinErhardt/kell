@@ -23,7 +23,7 @@ module Exec
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), IfClause(..), Redirect(..))
+import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -68,8 +68,14 @@ runIfClause cl = do
                             Nothing   -> return ExitSuccess
 
 runCmd :: Cmd -> Shell ExitCode
-runCmd (SCmd cmd)     = runSmpCmd cmd
-runCmd (ICmd cmd) = runIfClause cmd
+runCmd (SCmd cmd)        = runSmpCmd cmd
+runCmd (CCmd cmd redirs) = do
+  ioReversals <- foldl1 (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (doRedirect <$> redirs)
+  exitCode <- runCmpCmd cmd
+  lift $ ioReversals >> return exitCode
+
+runCmpCmd :: CmpCmd -> Shell ExitCode
+runCmpCmd (IfCmp clause) = runIfClause clause
 
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
