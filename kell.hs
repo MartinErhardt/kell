@@ -13,41 +13,113 @@
 --  limitations under the License.
 -- {-# LANGUAGE TupleSections #-}
 import Lexer
+import TokParser
 import Exec (Shell)
 import Exec
+
+import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
+import qualified Control.Exception as Ex
+
+import System.IO
+import System.IO.Error
+import System.Environment
 import System.Exit
 import System.Posix.Process
-import Text.Parsec
-import Text.Parsec
+
+import Data.Functor
+import Data.Char
 import qualified Data.List as L
 import qualified Data.Text as Txt
-import TokParser
-import Text.Parsec.Error(Message(..))
-import Text.Parsec.Error
-import System.IO
 
-main :: IO ()
-main = getDefaultShellEnv >>= evalStateT (printPrompt "$PS1" >> lift getLine >>= cmdPrompt ) >> return ()
--- unpack . replace (pack "\\\n") (pack "") . pack -- >> exitImmediately ExitSuccess
+import Text.Parsec
+import Text.Parsec.Prim
+import Text.Parsec.Pos
+import Text.Parsec.Pos (SourcePos(..))
+import Text.Parsec.Error
+import Text.Parsec.Error(ParseError(..))
+import Text.Parsec.Error(Message(..))
+
+data Origin = FromFile{ commandFile    :: String}
+            | FromOp  { commandStr     :: String
+                      , commandName    :: Maybe(String)}
+            | FromStdIn | None deriving(Eq,Show)
+-- data Option = Interactive deriving(Eq,Show)
+data PArgs = PArgs { opts        :: String
+                   , script      :: Origin
+                   , args        :: [String] }deriving (Eq,Show)
+type ArgError = String
+
+main :: IO ExitCode
+main = do
+  args  <- getArgs
+  shEnv <- getDefaultShellEnv
+  pArgs <- handlePArgs $ parse parseArgs "args" args
+  evalStateT (execInterpreter pArgs) shEnv
+  where handlePArgs pArgs = case pArgs of Right pa -> return pa
+                                          Left e   -> print e >> (exitWith $ ExitFailure 1) >> (return $ PArgs "" None [])
+
+type ArgParser = Parsec [String] ()
+
+parseArgs :: ArgParser PArgs
+parseArgs = do
+  opts <- concat <$> (many $ tokenPrim show incPos checkOpt)
+  orig <- parseOrigin $ getOrigOpt opts
+  many arg >>= return . (PArgs opts orig)
+  where getOrigOpt allOpts = let origOpts = L.intersect allOpts "cs"
+                             in if origOpts == [] then 'z' else head origOpts
+        parseOrigin opt = case opt of 'c' -> FromOp <$> name <*> ((Just <$> name) <|> return Nothing)
+                                      's' -> return FromStdIn
+                                      'z' -> (name >>= (return . FromFile) ) <|> return None
+        checkOpt w = if          head w == '-' then Just $ tail w             -- TODO check if lowercase
+                     else guard (head w == '+') $>  (toUpper <$> tail w)
+        incPos pos x xs = incSourceColumn pos 1
+        name    = tokenPrim show incPos (\w -> guard ((head w /= '+') && (head w /= '-')) $> w)
+        arg     = tokenPrim show incPos Just
+
+execInterpreter :: PArgs -> Shell ExitCode
+execInterpreter args =
+  case script args of FromFile path    -> do
+                                            handle   <- lift $ openFile path ReadMode
+                                            exitCode <- interprete False (getLn handle) ExitSuccess
+                                            lift $ hClose handle
+                                            return exitCode
+                      FromOp str name  -> (failOnParseE <$> interpreteCmd False noMoreLn str)
+                      -- start interactive if stdin empty
+                      FromStdIn        -> interprete False (getLn stdin) ExitSuccess
+                      None             -> interprete True  (getLn stdin) ExitSuccess
+  where noMoreLn = return . Left $ userError "end of input"
+        getLn handle = Ex.try $ ((++"\n") <$> hGetLine handle) -- dont pp if EOF
+--  where interactiveM = 'i' `elem` opts args
 
 printPrompt :: String -> Shell ()
 printPrompt var = lift (hFlush stdout) >> expandNoSplit execCmd var >>= lift . putStr >> lift (hFlush stdout)
 
-cmdPrompt :: String -> Shell ()
-cmdPrompt curCmd = do
-  --lift $ print toks
-  if curCmd == "" then continuePrompt
-  else if last curCmd == '\\' then incomplete $ init curCmd 
-  else case toks of (Right v) -> case parse2AST v of (Right ast) -> (lift $ print ast) >> runSepList ast >>= lift . print >> continuePrompt
-                                                     (Left e)    -> handleErrs "EOF" e
-                    (Left e) -> handleErrs "eof" e
-  where parse2AST = parse parseToks "tokenstream"
-        toks      = parse lexer "charstream" curCmd
-        incomplete str = printPrompt "$PS2" >> lift getLine >>= (cmdPrompt . (str++))
-        continuePrompt = printPrompt "$PS1" >> lift getLine >>= cmdPrompt
-        -- FIXME no line extension on echo >\n
+failOnParseE :: (Either ParseError ExitCode) -> ExitCode
+failOnParseE status = case status of (Right ec) -> ec
+                                     _          -> ExitFailure 1
+
+interprete :: Bool -> IO (Either IOError String) -> ExitCode -> Shell ExitCode
+interprete interact lineGetter lastEC = when interact (printPrompt "$PS1") >> lift lineGetter >>= handleFetch
+  where handleExec res = if interact then             interprete interact lineGetter (failOnParseE res)
+                         else case res of Right ec -> interprete interact lineGetter ec
+                                          Left  e  -> (return $ ExitFailure 1)
+        escNLn cmd = if interact && last cmd == '\\' then tail $ tail cmd else cmd
+        handleFetch lnew = case lnew of Right s -> interpreteCmd interact lineGetter (escNLn s) >>= handleExec
+                                        Left  e -> return lastEC
+
+interpreteCmd :: Bool -> IO (Either IOError String) -> String -> Shell (Either ParseError ExitCode)
+interpreteCmd interact lineGetter curCmd =
+  case toks of Right v -> case parse2AST v of Right ast -> runSepList ast >>= return . Right
+                                              Left e    -> handleErrs "EOF" e
+               Left e  -> handleErrs "eof" e
+  where parse2AST   = parse parseToks "tokenstream"
+        toks        = parse lexer "charstream" curCmd
+        incompleteFetch eOld oldLn newLn = case newLn of Right s -> interpreteCmd interact lineGetter (oldLn++s)
+                                                         Left e  -> return $ Left eOld
+        incomplete e str     = when interact (printPrompt "$PS2") >> lift lineGetter >>= incompleteFetch e str
+        handleErrs :: String -> ParseError -> Shell (Either ParseError ExitCode)
         handleErrs eofT e = if [eofT,""] `L.intersect` (messageString <$> errorMessages e) /= []
-                              then incomplete (curCmd ++ "\n")
-                            else (lift $ print e ) >> continuePrompt
+                              then incomplete e curCmd
+                            else (lift $ print e ) >> (return $ Left e)

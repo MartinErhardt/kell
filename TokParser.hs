@@ -109,9 +109,9 @@ getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) . testWord)
   where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
           where c2Maybe res = case res of Right t  -> Just t
                                           Left _   -> Nothing
-        parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> parseNameRest
+        parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> parseNameRest -- many (alphaNum <|> char '_')
           where parseNameRest = ((++) . (:[]) <$> (letter <|> char '_' <|> digit) <*> parseNameRest) <|> return ""
-        parseAssignWord = (,) <$> parseXBDName <* char '=' <*> rest
+        parseAssignWord = (,) <$> parseXBDName <* char '=' <*> rest -- many anyChar
           where rest = (eof >> return "") <|> (++) . (:[]) <$> anyChar <*> rest
 
 getIONr :: TokParser Int
@@ -198,7 +198,7 @@ doGroup :: TokParser SepList
 doGroup = resWord "do" *> parseCmpList <* resWord "done"
 
 parseToks :: TokParser SepList
-parseToks = parseSepList False [SEMI,Ampersand] <* (eof <|> op EOF)
+parseToks = parseSepList False [SEMI,Ampersand,NEWLINE] <* (eof <|> op EOF)
 
 -- parseSub :: TokParser SmpCmd
 -- parseSub  = parseSmpCmd  <* (eof <|> op EOF)
