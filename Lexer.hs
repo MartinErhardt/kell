@@ -42,13 +42,9 @@ reservedOps = [("&&",    AND_IF)
 
 parseReservedOp :: Parser Token
 parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> reservedOps) 
-comment = (anyChar >>= handler) <|> return ""
-  where handler c = case c of '\n' -> unexpected [c]
-                              _    -> (++[c]) <$> comment
 
 parseWord :: Parser String
 parseWord = (eof       >>            return "" )
-        <|> (char '#'  >> comment >> return "" )
         <|> (              (++)            <$> escape '\\'                       <*> (parseWord <|> return "") )
         <|> (char '\'' >> ((++) . ("'"++)  <$> quote  (char '\'' >> return "'" ) <*> (parseWord <|> return "") ) )
         <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" ) <*> (parseWord <|> return "") ) )
@@ -61,6 +57,6 @@ parseWord = (eof       >>            return "" )
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])
     <|> ( ( (++) . (:[]) )       <$> parseReservedOp <*>                         lexer)
-    <|> (char '#' >> comment                                                  >> lexer)
+    <|> (char '#' >> many (noneOf "\n")                                       >> lexer)
     <|> (char ' '                                                             >> lexer)
     <|> ( ( (++) . (:[]) . Word) <$> parseWord       <*> ((eof >> return []) <|> lexer) )

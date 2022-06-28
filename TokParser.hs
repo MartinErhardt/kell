@@ -109,10 +109,8 @@ getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) . testWord)
   where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
           where c2Maybe res = case res of Right t  -> Just t
                                           Left _   -> Nothing
-        parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> parseNameRest -- many (alphaNum <|> char '_')
-          where parseNameRest = ((++) . (:[]) <$> (letter <|> char '_' <|> digit) <*> parseNameRest) <|> return ""
-        parseAssignWord = (,) <$> parseXBDName <* char '=' <*> rest -- many anyChar
-          where rest = (eof >> return "") <|> (++) . (:[]) <$> anyChar <*> rest
+        parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> many (alphaNum <|> char '_')
+        parseAssignWord = (,) <$> parseXBDName <* char '=' <*> many anyChar
 
 getIONr :: TokParser Int
 getIONr = tokenPrim show nextPosW ((>>= Rd.readMaybe) . testWord)
