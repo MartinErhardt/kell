@@ -15,7 +15,7 @@
 module TokParser
 (
   parseToks,
-  parseSmpCmd,
+  parseSub,
   TokParser,
   Cmd(..), CmpCmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause, WhileLoop(..),
   clauses, else_part,
@@ -200,5 +200,6 @@ doGroup = resWord "do" *> parseCmpList <* resWord "done"
 parseToks :: TokParser SepList
 parseToks = (newLnList *> eofP *> return []) <|> (parseSepList False [SEMI,Ampersand] <* newLnList <* eofP)
   where eofP = eof <|> op EOF
--- parseSub :: TokParser SmpCmd
--- parseSub  = parseSmpCmd  <* (eof <|> op EOF)
+
+parseSub :: TokParser SepList
+parseSub  = parseSepList False [SEMI,Ampersand] <* (eof <|> op EOF)

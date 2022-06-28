@@ -136,7 +136,7 @@ exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Ri
         errorMsg err = print err >> (return $ ExitFailure 1)
 
 execCmd :: String -> Shell ExitCode
-execCmd = exec parseSmpCmd runSmpCmd
+execCmd = exec parseSub runSepList
 
 waitToExitCode :: ProcessID -> Shell ExitCode
 waitToExitCode pid = do
