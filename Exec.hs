@@ -110,6 +110,7 @@ runAndOr andOrL = case head andOrL of (p,AND_IF) -> runPipe p >>= dropIf (/=Exit
           rest = tail . dropWhile (( == (snd $ head andOrL)) . snd)
 
 runSepList :: SepList -> Shell ExitCode
+runSepList [] = return ExitSuccess
 runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> return ExitSuccess >>= continueWith sepL
                                     (andOrL, _)         -> runAndOr andOrL >>= continueWith sepL
    --TODO store PID in ShellEnv; close stdInput in async child

@@ -198,7 +198,7 @@ doGroup :: TokParser SepList
 doGroup = resWord "do" *> parseCmpList <* resWord "done"
 
 parseToks :: TokParser SepList
-parseToks = parseSepList False [SEMI,Ampersand,NEWLINE] <* (eof <|> op EOF)
-
+parseToks = (newLnList *> eofP *> return []) <|> (parseSepList False [SEMI,Ampersand] <* newLnList <* eofP)
+  where eofP = eof <|> op EOF
 -- parseSub :: TokParser SmpCmd
 -- parseSub  = parseSmpCmd  <* (eof <|> op EOF)
