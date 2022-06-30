@@ -1,13 +1,11 @@
 $1 > bash.stdout 2> bash.errout
 bashReturn=$?
 
-../../kell $1 > kell.stdout 2> kell.errout
+./kell $1 > kell.stdout 2> kell.errout
 kellReturn=$?
 
 echo "shell: $ShELL"
 echo "user:  $(whoami)"
-
-ls -l
 
 returnCode=0
 if test $bashReturn != $kellReturn

@@ -45,6 +45,7 @@ jobs:
         cabal install --installdir $PWD --install-method=copy --overwrite-policy=always
     - name: Run tests
       run: |
-        ls -l
+        ls -la
+        echo "user: $(whoami)"
         chmod +x kell
         cabal test all
