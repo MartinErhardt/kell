@@ -18,6 +18,13 @@ then
 else
   returnCode=0
 fi
-rm *out
 echo $returnCode
+if [[ $returnCode -eq 1 ]]
+then
+  cat *.stdout
+elif [[returnCode -eq 2]]
+then
+  cat *.errout
+fi
+rm *out
 exit $returnCode
