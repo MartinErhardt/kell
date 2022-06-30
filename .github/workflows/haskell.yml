@@ -43,5 +43,7 @@ jobs:
       run: |
         echo $PWD
         cabal install --installdir $PWD --install-method=copy --overwrite-policy=always
+        ls -l
+        chmod +x kell
     - name: Run tests
       run: cabal test all
