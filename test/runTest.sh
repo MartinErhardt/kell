@@ -4,8 +4,10 @@ bashReturn=$?
 kell $1 > kell.stdout 2> kell.errout
 kellReturn=$?
 
+echo "shell $ShELL"
+
 returnCode=0
-if [[ $bashReturn != $kellReturn ]]
+if test $bashReturn != $kellReturn
 then
   echo "exit code bash: $bashReturn\texit code kell: $kellReturn"
   returnCode=3
@@ -19,10 +21,10 @@ else
   returnCode=0
 fi
 echo $returnCode
-if [[ $returnCode -eq 1 ]]
+if test $returnCode -eq 1
 then
   cat *.stdout
-elif [[returnCode -eq 2]]
+elif test $returnCode -eq 2
 then
   cat *.errout
 fi
