@@ -1,7 +1,7 @@
 $1 > bash.stdout 2> bash.errout
 bashReturn=$?
 
-./kell $1 > kell.stdout 2> kell.errout
+kell $1 > kell.stdout 2> kell.errout
 kellReturn=$?
 
 echo "shell: $ShELL"
