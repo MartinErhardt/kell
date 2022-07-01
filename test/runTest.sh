@@ -4,7 +4,7 @@ bashReturn=$?
 kell $1 > kell.stdout 2> kell.errout
 kellReturn=$?
 
-echo "shell: $ShELL"
+echo "shell: $SHELL"
 echo "user:  $(whoami)"
 
 returnCode=0

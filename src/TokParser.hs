@@ -24,13 +24,15 @@ module TokParser
   Redirect(Redirect),
   redirects
 ) where
+import Lexer (Token (..))
+import ShCommon
+
 import qualified Text.Read as Rd
 import Text.Parsec
 import Text.Parsec.Prim
 import Text.Parsec.Char
 import Text.Parsec.Pos
 import Text.Parsec.String
-import Lexer (Token (..))
 import System.IO
 import Data.Maybe
 import System.Posix.IO
@@ -109,7 +111,7 @@ getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) . testWord)
   where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
           where c2Maybe res = case res of Right t  -> Just t
                                           Left _   -> Nothing
-        parseXBDName =           (++) . (:[]) <$> (letter <|> char '_')           <*> many (alphaNum <|> char '_')
+
         parseAssignWord = (,) <$> parseXBDName <* char '=' <*> many anyChar
 
 getIONr :: TokParser Int

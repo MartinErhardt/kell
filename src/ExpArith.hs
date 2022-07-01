@@ -48,6 +48,8 @@ bOpMap = [[("*",  (*))]
          ,[("|",  (.|.))]
          ,[("&&", b2I (&&))]
          ,[("||", b2I (||))]]
+  where b2I f i1 i2 = fromEnum $ f (i1>0) (i2>0)
+        fE  f i1 i2 = fromEnum $ f i1     i2
 
 lexer :: Tok.GenTokenParser String () Shell
 lexer = Tok.makeTokenParser style

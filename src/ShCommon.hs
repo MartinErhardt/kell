@@ -23,8 +23,7 @@ module ShCommon(
   quoteEsc,
   dQuote,
   getDollarExp,
-  b2I,
-  fE
+  parseXBDName
 )
 where
 import Data.Stack
@@ -108,6 +107,9 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                                                              else quote (getDollarExp f a) >>= return . (str++)
         stackHandler (str, Nothing) = fail $ "no" ++ str
 
+parseXBDName :: Parser String
+parseXBDName = (++) . (:[]) <$> (letter <|> char '_') <*> many (alphaNum <|> char '_')
+
 data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
                       -- , func :: Map.Map String String
                          , shFMode :: FileMode
@@ -132,8 +134,3 @@ putVar name newval = do
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
                                                     _               -> (newval, False)
 
-b2I :: (Bool -> Bool -> Bool) -> (Int -> Int -> Int)
-b2I f i1 i2 = fromEnum $ f (i1>0) (i2>0)
-
-fE :: (Int -> Int -> Bool) -> (Int -> Int -> Int)
-fE  f i1 i2 = fromEnum $ f i1     i2

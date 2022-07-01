@@ -11,13 +11,15 @@
 --   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 --   See the License for the specific language governing permissions and
 --   limitations under the License.
-
+{-# LANGUAGE TupleSections #-}
 module WordExp(
   expandWord,
   expandNoSplit
 ) where
 import ShCommon
 import ExpArith
+
+import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import Data.Stack
@@ -45,10 +47,32 @@ launchCmdSub launcher cmd = do
   lift $ getProcessStatus False False forkedPId -- TODO Error handling
   lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
-expandParams :: String -> Shell String
-expandParams name = getVar name >>= return . handleVal
-  where handleVal var =  case var of (Just val) -> val -- set and not null
-                                     (Nothing)  -> ""  -- unset
+expandParams :: (String -> Shell ExitCode) -> String -> Shell String
+expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter expansion" toExp
+  where parseSplit = foldl1 (<|>) ( try . string . fst <$> actionT) <|> return "-"
+        parseParamExp :: Parser (String, String, String)
+        parseParamExp = (, , ) <$> parseXBDName <*> parseSplit <*> many anyChar
+        assignW p w = putVar p w >> return w
+        first (x ,_, _) = x
+        sec   (_, x, _) = x
+        third (_ ,_ ,x) = x
+        actionT :: [(String, (String -> String -> String, String -> String -> Shell String, String -> String -> Shell String))]
+        actionT = [("-",  ((\p w -> p), (\p w -> return w),  (\p w -> return w) ))
+                  ,("-",  ((\p w -> p), (\p w -> return ""), (\p w -> return w) ))
+                  ,(":=", ((\p w -> p), assignW,             assignW ))
+                  ,("=",  ((\p w -> p), (\p w -> return ""), assignW ))
+                  ,(":?", ((\p w -> p), assignW,             assignW )) --TODO throw error
+                  ,("?",  ((\p w -> p), assignW,             assignW )) --TODO throw error
+                  ,(":+", ((\p w -> w), (\p w -> return ""), (\p w -> return "")))
+                  ,("+",  ((\p w -> w), (\p w -> return w),  (\p w -> return "")))]
+        extractAction split f = case Map.lookup split (Map.fromList actionT) of Just triple -> f triple
+        applyAction :: String -> String -> Maybe String -> String -> Shell String
+        applyAction split name p w = case p of Nothing   -> (extractAction split third ) name w
+                                               Just ""   -> (extractAction split sec   ) name w
+                                               Just sub  -> return $ (extractAction split first) sub w
+        expandTo (p, split, w) = join $ applyAction split p <$> getVar p <*> expandNoSplit launcher w
+        handleParseOutput p = case p of Right triple -> expandTo triple
+                                        _            -> return ""
 
 fieldExpand :: String -> Shell [Field]
 fieldExpand s = getVar "IFS" >>= return . ifsHandler >>= (flip parse2Shell) s . split2F
@@ -106,20 +130,23 @@ parseExps doFExps names = (eof >> return [])
         dQuoteRem = dQuote (char '"'  >> return "")
         bQuoteRem = quoteEsc ( (++) <$> (char '\\' >> (((char '\\' <|> char '$' <|> char '`') >> anyChar >>= return . (:[]) )
                                                   <|> (anyChar >>= return . (['\\']++) . (:[]) ) ) ) ) (char '`' >> return "")
+        -- the expansion shall use the longest valid name (see XBD Name)
+        namesSorted = L.sortBy (\a b -> compare (length b) (length a)) names
         getVExp :: [String] -> Parser String
-        getVExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> names )
+        getVExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> namesSorted )
         getExp begin end = try( string begin) >> (quote $ getDollarExp (const "") (stackPush stackNew end) )
         processDQuote = enc (ExpTok NoExp False "\"") . (\(Right v) -> v) . parse (parseExps False names) "qE"
 
 execExp :: (String -> Shell ExitCode) -> ExpTok -> Shell [Field]
 execExp launcher (ExpTok NoExp _ s) = return [s]
-execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub launcher s
-                                                ParamExp -> expandParams s
+execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub  launcher s
+                                                ParamExp -> expandNoSplit launcher s >>= expandParams launcher
                                                 ArithExp -> expandNoSplit launcher s >>= expandArith
                          >>= return . (\(Right v) -> v) . parse escapeUnorigQuotes "EscapeUnorigQuotes"
                          >>= if split then fieldExpand else return . (:[])
 
 expandWord :: (String -> Shell ExitCode) -> Bool -> String -> Shell [Field]
+expandWord launcher split ""      = return [""]
 expandWord launcher split cmdWord = do
   env  <- get
   exps <- parse2Shell (parseExps split $ names env) cmdWord
