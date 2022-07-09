@@ -41,7 +41,7 @@ import System.IO
 import System.Exit
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Either
+import Control.Monad.Trans.Except
 import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
@@ -75,11 +75,15 @@ runWhileLoop (WhileLoop cond body) = runSepList cond >>= handler ExitSuccess
         restLoop = join $ handler <$> runSepList body <*> runSepList cond
 
 runCmd :: Cmd -> Shell ExitCode
-runCmd (SCmd cmd)        = runSmpCmd cmd
-runCmd (CCmd cmd redirs) = do
-  ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
-  exitCode <- runCmpCmd cmd
-  liftIO $ ioReversals >> return exitCode
+runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleCmdErr
+                               CCmd cmd redirs -> runCCmd cmd redirs
+  where handleCmdErr exit = do
+          ia <- interactive <$> (lift get)
+          case exit of ExpErr msg -> if ia then (liftIO $ putStrLn msg) >> (return $ ExitFailure 1) else throwE exit
+        runCCmd cmd redirs = do
+          ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
+          exitCode <- catchE (runCmpCmd cmd) handleCmdErr
+          liftIO $ ioReversals >> return exitCode
 
 runCmpCmd :: CmpCmd -> Shell ExitCode
 runCmpCmd (IfCmp clause) = runIfClause  clause
@@ -88,7 +92,7 @@ runCmpCmd (WhlCmp loop ) = runWhileLoop loop
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
   pipes          <- liftIO $ sequence [createPipe | n <- [1..length pipeline-1]]
-  createChildren <- get >>= sequence . ( (liftIO . forkProcess) <$>) . (finalActions pipes)
+  createChildren <- lift get >>= sequence . ( (liftIO . forkProcess) <$>) . (finalActions pipes)
   liftIO $ sequence ((\(fd1,fd2) -> closeFd fd1 >> closeFd fd2) <$> pipes)
   waitToExitCode . last $ createChildren -- ksh style ...
   where fds = [createPipe | n <- [1..((length pipeline)-1)]]
@@ -99,7 +103,7 @@ runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
         doRedBeg (inFd,outFd) = dupTo outFd stdOutput >> closeFd inFd  >> closeFd outFd
         doRedEnd (inFd,outFd) = dupTo inFd stdInput   >> closeFd outFd >> closeFd inFd
         createRedirL pL = [doRedBeg (head pL)] ++ (doRedMid <$> (\l -> zip l $ tail l) pL) ++ [doRedEnd (last pL)]
-        runAction ev redirs pipeA = redirs >> (runEitherT $ evalStateT (runCmd pipeA) ev) >> return ()
+        runAction ev redirs pipeA = redirs >> evalStateT (runExceptT $ runCmd pipeA) ev >> return ()
         finalActions ps ev = zipWith (runAction ev) (createRedirL ps) pipeline
 
 runAndOr :: AndOrList -> Shell ExitCode
@@ -117,7 +121,7 @@ runSepList [] = return ExitSuccess
 runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> return ExitSuccess >>= continueWith sepL
                                     (andOrL, _)         -> runAndOr andOrL >>= continueWith sepL
    --TODO store PID in ShellEnv; close stdInput in async child
-  where runAsync andOrL = get >>= liftIO . forkProcess . (>> return ()) . runEitherT . evalStateT (runAndOr andOrL)
+  where runAsync andOrL = lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ runAndOr andOrL)
         continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
 getDefaultShellEnv :: Bool -> IO ShellEnv
@@ -149,7 +153,7 @@ waitToExitCode pid = do
 
 launchCmd :: FilePath -> [String] -> Shell () -> Shell ExitCode
 launchCmd cmd args prepare = do 
-  forkedPId <- get >>= liftIO . forkProcess . (>> return ()) . runEitherT . evalStateT (prepare >> liftIO runInCurEnv)
+  forkedPId <- lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ prepare >> liftIO runInCurEnv)
   waitToExitCode forkedPId
   where runInCurEnv = getEnvironment >>= (executeFile cmd True args) . Just
 
@@ -158,7 +162,7 @@ doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 
 doRedirect :: Redirect -> Shell (IO Fd)
 doRedirect (Redirect tok fd path) = do expandedPath <- expandNoSplit execCmd path
-                                       get >>= liftIO . (getAction tok fd expandedPath) . shFMode
+                                       lift get >>= liftIO . (getAction tok fd expandedPath) . shFMode
   where truncOFlag   = (OpenFileFlags False False False False True)
         noFlag       = (OpenFileFlags False False False False False)
         appendOFlag  = (OpenFileFlags True  False False False False)

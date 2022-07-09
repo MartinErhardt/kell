@@ -24,7 +24,7 @@ import Control.Monad.IO.Class
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
-import Control.Monad.Trans.Either
+import Control.Monad.Trans.Except
 import Data.Stack
 import qualified Data.List as L
 import qualified Data.Map as Map
@@ -40,11 +40,11 @@ type Field = String
 launchCmdSub :: (String -> Shell ExitCode) -> String -> Shell String
 launchCmdSub launcher cmd = do
   pipe      <- liftIO createPipe
-  curEnv    <- get
+  curEnv    <- lift get
   forkedPId <- liftIO . forkProcess $ do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
-    runEitherT $ evalStateT (launcher cmd) curEnv
+    evalStateT (runExceptT $ launcher cmd) curEnv
     return ()
   liftIO $ closeFd . snd $ pipe
   liftIO $ getProcessStatus False False forkedPId -- TODO Error handling
@@ -74,8 +74,7 @@ expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter
                                                Just ""   -> (extractAction split sec   ) name w
                                                Just sub  -> return $ (extractAction split first) sub w
         expandTo (p, split, w) = join $ applyAction split p <$> getVar p <*> expandNoSplit launcher w
-	raiseExpErr :: String -> String -> String -> Shell String
-	raiseExpErr msg p w = lift . newEitherT . return . Left . ExpErr $ msg ++ ": " ++ p
+        raiseExpErr msg p w = throwE . ExpErr $ msg ++ ": " ++ p
         handleParseOutput p = case p of Right triple -> expandTo triple
                                         _            -> return ""
 
@@ -153,7 +152,7 @@ execExp launcher (ExpTok t split s) = case t of CmdExp   -> launchCmdSub  launch
 expandWord :: (String -> Shell ExitCode) -> Bool -> String -> Shell [Field]
 expandWord launcher split ""      = return [""]
 expandWord launcher split cmdWord = do
-  env  <- get
+  env  <- lift get
   exps <- parse2Shell (parseExps split $ names env) cmdWord
   -- lift $ print exps
   fs   <- foldl1 (\a1 a2 -> ppJoinEnds <$> a1 <*> a2) (execExp launcher <$> exps)

@@ -35,7 +35,7 @@ import Text.Parsec.String (Parser)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.Either
+import Control.Monad.Trans.Except
 import System.Posix.Types(Fd(..),FileMode)
 import System.Posix.Files
 import System.Environment
@@ -130,10 +130,10 @@ data ShellError = SyntaxErr      String
                 | CmdNotFoundErr String
                   deriving(Show)
 
-type Shell = StateT ShellEnv (EitherT ShellError IO)
+type Shell = ExceptT ShellError (StateT ShellEnv IO)
 
 getVar :: String -> Shell (Maybe String)
-getVar name = get >>= return . getVal . (Map.lookup name) . var
+getVar name = lift get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
 
@@ -145,10 +145,10 @@ getVar name = get >>= return . getVal . (Map.lookup name) . var
 
 putVar :: String -> String -> Shell ()
 putVar name newval = do
-  oldentry <- get >>= return . (Map.lookup name) . var
+  oldentry <- lift get >>= return . (Map.lookup name) . var
   case oldentry of (Just (_,True)) -> liftIO $ setEnv name newval
                    _               -> return ()
-  get >>= put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
+  lift get >>= lift . put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
   where changeNamespace modifier curEnv = curEnv {var = modifier curEnv }
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
                                                     _               -> (newval, False)
