@@ -40,6 +40,8 @@ import System.Posix.IO(OpenFileFlags(..))
 import System.IO
 import System.Exit
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Either
 import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
@@ -77,7 +79,7 @@ runCmd (SCmd cmd)        = runSmpCmd cmd
 runCmd (CCmd cmd redirs) = do
   ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
   exitCode <- runCmpCmd cmd
-  lift $ ioReversals >> return exitCode
+  liftIO $ ioReversals >> return exitCode
 
 runCmpCmd :: CmpCmd -> Shell ExitCode
 runCmpCmd (IfCmp clause) = runIfClause  clause
@@ -85,9 +87,9 @@ runCmpCmd (WhlCmp loop ) = runWhileLoop loop
 
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
-  pipes          <- lift $ sequence [createPipe | n <- [1..length pipeline-1]]
-  createChildren <- get >>= sequence . ( (lift . forkProcess) <$>) . (finalActions pipes)
-  lift $ sequence ((\(fd1,fd2) -> closeFd fd1 >> closeFd fd2) <$> pipes)
+  pipes          <- liftIO $ sequence [createPipe | n <- [1..length pipeline-1]]
+  createChildren <- get >>= sequence . ( (liftIO . forkProcess) <$>) . (finalActions pipes)
+  liftIO $ sequence ((\(fd1,fd2) -> closeFd fd1 >> closeFd fd2) <$> pipes)
   waitToExitCode . last $ createChildren -- ksh style ...
   where fds = [createPipe | n <- [1..((length pipeline)-1)]]
         doRedMid ((in1,out1), (in2,out2)) = do
@@ -96,8 +98,9 @@ runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
           closeFd out1 >> closeFd in2 >> closeFd in1 >> closeFd out2
         doRedBeg (inFd,outFd) = dupTo outFd stdOutput >> closeFd inFd  >> closeFd outFd
         doRedEnd (inFd,outFd) = dupTo inFd stdInput   >> closeFd outFd >> closeFd inFd
-        createRedL pL = [doRedBeg (head pL)] ++ (doRedMid <$> (\l -> zip l $ tail l) pL) ++ [doRedEnd (last pL)]
-        finalActions ps ev = zipWith (\redirs pipeA -> redirs >> evalStateT (runCmd pipeA) ev >> return () ) (createRedL ps) pipeline
+        createRedirL pL = [doRedBeg (head pL)] ++ (doRedMid <$> (\l -> zip l $ tail l) pL) ++ [doRedEnd (last pL)]
+        runAction ev redirs pipeA = redirs >> (runEitherT $ evalStateT (runCmd pipeA) ev) >> return ()
+        finalActions ps ev = zipWith (runAction ev) (createRedirL ps) pipeline
 
 runAndOr :: AndOrList -> Shell ExitCode
 runAndOr [(pipe,EOF)] = runPipe pipe
@@ -114,22 +117,22 @@ runSepList [] = return ExitSuccess
 runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> return ExitSuccess >>= continueWith sepL
                                     (andOrL, _)         -> runAndOr andOrL >>= continueWith sepL
    --TODO store PID in ShellEnv; close stdInput in async child
-  where runAsync andOrL = get >>= lift . forkProcess . (>> return ()) . evalStateT (runAndOr andOrL)
+  where runAsync andOrL = get >>= liftIO . forkProcess . (>> return ()) . runEitherT . evalStateT (runAndOr andOrL)
         continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
-getDefaultShellEnv :: IO ShellEnv
-getDefaultShellEnv = do
+getDefaultShellEnv :: Bool -> IO ShellEnv
+getDefaultShellEnv interactive = do
   envVars <- ( ((\(name,val) -> (name,(val,True)) ) <$> ) <$> getEnvironment)
   foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
-  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) ownerModes
+  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) interactive ownerModes
   where preDefined = [("PS1",  ("$ ",  False))
                      ,("PS2",  ("> ",  False))
                      ,("SHELL",("kell",True ))]
 
 exec :: TokParser a -> (a -> Shell ExitCode) -> String -> Shell ExitCode
 exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
-                                                                             (Left err)  -> lift $ errorMsg err
-                                        (Left err)  -> lift $ errorMsg err
+                                                                             (Left err)  -> liftIO $ errorMsg err
+                                        (Left err)  -> liftIO $ errorMsg err
   where toks :: Either ParseError [Token]
         toks = parse lexer "subshell" cmd
         parse2Ast tokens = parse parser "tokenstreamsubshell" tokens
@@ -140,14 +143,13 @@ execCmd = exec parseSub runSepList
 
 waitToExitCode :: ProcessID -> Shell ExitCode
 waitToExitCode pid = do
-  state <- lift $ getProcessStatus True False pid
+  state <- liftIO $ getProcessStatus True False pid
   case state of (Just (Exited exitCode) ) -> return exitCode
                 _                         -> waitToExitCode pid
 
 launchCmd :: FilePath -> [String] -> Shell () -> Shell ExitCode
 launchCmd cmd args prepare = do 
-  curEnv <- get
-  forkedPId <- lift . forkProcess $ evalStateT (prepare >> lift runInCurEnv) curEnv
+  forkedPId <- get >>= liftIO . forkProcess . (>> return ()) . runEitherT . evalStateT (prepare >> liftIO runInCurEnv)
   waitToExitCode forkedPId
   where runInCurEnv = getEnvironment >>= (executeFile cmd True args) . Just
 
@@ -156,7 +158,7 @@ doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 
 doRedirect :: Redirect -> Shell (IO Fd)
 doRedirect (Redirect tok fd path) = do expandedPath <- expandNoSplit execCmd path
-                                       get >>= lift . (getAction tok fd expandedPath) . shFMode
+                                       get >>= liftIO . (getAction tok fd expandedPath) . shFMode
   where truncOFlag   = (OpenFileFlags False False False False True)
         noFlag       = (OpenFileFlags False False False False False)
         appendOFlag  = (OpenFileFlags True  False False False False)

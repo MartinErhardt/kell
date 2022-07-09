@@ -1,6 +1,6 @@
 *.o
 *.hi
-hssh
+kell
 *.swp
 '.swo
 dist-newstyle/*

@@ -15,6 +15,7 @@
 module ShCommon(
   ShellEnv(..),
   Token(..),
+  ShellError(..),
   Shell,
   getVar,
   putVar,
@@ -31,8 +32,10 @@ import Data.Map as Map
 import Text.Parsec
 import Text.Parsec.String (Parser)
 
+import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Either
 import System.Posix.Types(Fd(..),FileMode)
 import System.Posix.Files
 import System.Environment
@@ -112,25 +115,41 @@ parseXBDName = (++) . (:[]) <$> (letter <|> char '_') <*> many (alphaNum <|> cha
 
 data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
                       -- , func :: Map.Map String String
+                         , interactive :: Bool
                          , shFMode :: FileMode
                          } deriving(Eq, Show)
+data ShellError = SyntaxErr      String
+                | SBIErr
+                | UtilErr
+                | RedirSBIErr    String
+                | RedirCmpCmdErr String
+                | RedirFuncErr   String
+                | RedirUErr      String
+                | AssignErr      String
+                | ExpErr         String
+                | CmdNotFoundErr String
+                  deriving(Show)
 
-type Shell = StateT ShellEnv IO
+type Shell = StateT ShellEnv (EitherT ShellError IO)
 
 getVar :: String -> Shell (Maybe String)
 getVar name = get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
 
+--raiseExpErr :: a -> String -> Shell a
+--raiseExpErr val msg = do
+--  ev <- get
+--  if interacive ev then return (ExpErr msg) else return val
 -- infixl 4 <*>>; (<*>>) :: Monad m => m (a -> m b) -> (m a -> m b); mamb <*>> ma = join (mamb <*> ma)
 
 putVar :: String -> String -> Shell ()
 putVar name newval = do
   oldentry <- get >>= return . (Map.lookup name) . var
-  case oldentry of (Just (_,True)) -> lift $ setEnv name newval
+  case oldentry of (Just (_,True)) -> liftIO $ setEnv name newval
                    _               -> return ()
   get >>= put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
-  where changeNamespace modifier curEnv = ShellEnv (modifier curEnv) (shFMode curEnv)
+  where changeNamespace modifier curEnv = curEnv {var = modifier curEnv }
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
                                                     _               -> (newval, False)
 

@@ -17,11 +17,14 @@ module WordExp(
   expandNoSplit
 ) where
 import ShCommon
+import ShCommon(ShellError(..))
 import ExpArith
 
+import Control.Monad.IO.Class
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
+import Control.Monad.Trans.Either
 import Data.Stack
 import qualified Data.List as L
 import qualified Data.Map as Map
@@ -36,16 +39,16 @@ type Field = String
 
 launchCmdSub :: (String -> Shell ExitCode) -> String -> Shell String
 launchCmdSub launcher cmd = do
-  pipe      <- lift createPipe
+  pipe      <- liftIO createPipe
   curEnv    <- get
-  forkedPId <- lift . forkProcess $ do
+  forkedPId <- liftIO . forkProcess $ do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
-    evalStateT (launcher cmd) curEnv
+    runEitherT $ evalStateT (launcher cmd) curEnv
     return ()
-  lift $ closeFd . snd $ pipe
-  lift $ getProcessStatus False False forkedPId -- TODO Error handling
-  lift $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
+  liftIO $ closeFd . snd $ pipe
+  liftIO $ getProcessStatus False False forkedPId -- TODO Error handling
+  liftIO $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
 expandParams :: (String -> Shell ExitCode) -> String -> Shell String
 expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter expansion" toExp
@@ -57,20 +60,22 @@ expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter
         sec   (_, x, _) = x
         third (_ ,_ ,x) = x
         actionT :: [(String, (String -> String -> String, String -> String -> Shell String, String -> String -> Shell String))]
-        actionT = [("-",  ((\p w -> p), (\p w -> return w),  (\p w -> return w) ))
-                  ,("-",  ((\p w -> p), (\p w -> return ""), (\p w -> return w) ))
-                  ,(":=", ((\p w -> p), assignW,             assignW ))
-                  ,("=",  ((\p w -> p), (\p w -> return ""), assignW ))
-                  ,(":?", ((\p w -> p), assignW,             assignW )) --TODO throw error
-                  ,("?",  ((\p w -> p), assignW,             assignW )) --TODO throw error
-                  ,(":+", ((\p w -> w), (\p w -> return ""), (\p w -> return "")))
-                  ,("+",  ((\p w -> w), (\p w -> return w),  (\p w -> return "")))]
+        actionT = [("-",  ((\p w -> p), (\p w -> return w),     (\p w -> return w) ))
+                  ,("-",  ((\p w -> p), (\p w -> return ""),    (\p w -> return w) ))
+                  ,(":=", ((\p w -> p), assignW,                assignW ))
+                  ,("=",  ((\p w -> p), (\p w -> return ""),    assignW ))
+                  ,(":?", ((\p w -> p), raiseExpErr "var null", raiseExpErr "var not found" )) --TODO throw error
+                  ,("?",  ((\p w -> p), assignW,                raiseExpErr "var not found" )) --TODO throw error
+                  ,(":+", ((\p w -> w), (\p w -> return ""),    (\p w -> return "")))
+                  ,("+",  ((\p w -> w), (\p w -> return w),     (\p w -> return "")))]
         extractAction split f = case Map.lookup split (Map.fromList actionT) of Just triple -> f triple
         applyAction :: String -> String -> Maybe String -> String -> Shell String
         applyAction split name p w = case p of Nothing   -> (extractAction split third ) name w
                                                Just ""   -> (extractAction split sec   ) name w
                                                Just sub  -> return $ (extractAction split first) sub w
         expandTo (p, split, w) = join $ applyAction split p <$> getVar p <*> expandNoSplit launcher w
+	raiseExpErr :: String -> String -> String -> Shell String
+	raiseExpErr msg p w = lift . newEitherT . return . Left . ExpErr $ msg ++ ": " ++ p
         handleParseOutput p = case p of Right triple -> expandTo triple
                                         _            -> return ""
 

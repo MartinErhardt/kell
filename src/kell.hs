@@ -12,12 +12,15 @@
 --   See the License for the specific language governing permissions and
 --  limitations under the License.
 -- {-# LANGUAGE TupleSections #-}
+import ShCommon(ShellError(..))
 import Lexer
 import TokParser
 import Exec (Shell)
 import Exec
 
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Either
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import qualified Control.Exception as Ex
@@ -54,11 +57,14 @@ type ArgError = String
 main :: IO ExitCode
 main = do
   args  <- getArgs
-  shEnv <- getDefaultShellEnv
   pArgs <- handlePArgs $ parse parseArgs "args" args
-  evalStateT (execInterpreter pArgs) shEnv
+  shEnv <- getDefaultShellEnv ('i' `elem` opts pArgs)
+  (runEitherT $ evalStateT (execInterpreter pArgs) shEnv) >>= exitHandler
   where handlePArgs pArgs = case pArgs of Right pa -> return pa
                                           Left e   -> print e >> (exitWith $ ExitFailure 1) >> (return $ PArgs "" None [])
+        exitHandler :: Either ShellError ExitCode -> IO ExitCode
+        exitHandler exit = case exit of Right e -> return e
+                                        Left  e -> return $ ExitFailure 1
 
 type ArgParser = Parsec [String] ()
 
@@ -81,9 +87,9 @@ parseArgs = do
 execInterpreter :: PArgs -> Shell ExitCode
 execInterpreter args =
   case script args of FromFile path    -> do
-                                            handle   <- lift $ openFile path ReadMode
+                                            handle   <- liftIO $ openFile path ReadMode
                                             exitCode <- interprete False (getLn handle) ExitSuccess
-                                            lift $ hClose handle
+                                            liftIO $ hClose handle
                                             return exitCode
                       FromOp str name  -> (failOnParseE <$> interpreteCmd False noMoreLn str)
                       -- start interactive if stdin empty
@@ -94,14 +100,14 @@ execInterpreter args =
 --  where interactiveM = 'i' `elem` opts args
 
 printPrompt :: String -> Shell ()
-printPrompt var = lift (hFlush stdout) >> expandNoSplit execCmd var >>= lift . putStr >> lift (hFlush stdout)
+printPrompt var = liftIO (hFlush stdout) >> expandNoSplit execCmd var >>= liftIO . putStr >> liftIO (hFlush stdout)
 
 failOnParseE :: (Either ParseError ExitCode) -> ExitCode
 failOnParseE status = case status of (Right ec) -> ec
                                      _          -> ExitFailure 1
 
 interprete :: Bool -> IO (Either IOError String) -> ExitCode -> Shell ExitCode
-interprete interact lineGetter lastEC = when interact (printPrompt "$PS1") >> lift lineGetter >>= handleFetch
+interprete interact lineGetter lastEC = when interact (printPrompt "$PS1") >> liftIO lineGetter >>= handleFetch
   where handleExec res = if interact then             interprete interact lineGetter (failOnParseE res)
                          else case res of Right ec -> interprete interact lineGetter ec
                                           Left  e  -> (return $ ExitFailure 1)
@@ -118,8 +124,8 @@ interpreteCmd interact lineGetter curCmd =
         toks        = parse lexer "charstream" curCmd
         incompleteFetch eOld oldLn newLn = case newLn of Right s -> interpreteCmd interact lineGetter (oldLn++s)
                                                          Left e  -> return $ Left eOld
-        incomplete e str     = when interact (printPrompt "$PS2") >> lift lineGetter >>= incompleteFetch e str
+        incomplete e str     = when interact (printPrompt "$PS2") >> liftIO lineGetter >>= incompleteFetch e str
         handleErrs :: String -> ParseError -> Shell (Either ParseError ExitCode)
         handleErrs eofT e = if [eofT,""] `L.intersect` (messageString <$> errorMessages e) /= []
                               then incomplete e curCmd
-                            else (lift $ print e ) >> (return $ Left e)
+                            else (liftIO $ print e ) >> (return $ Left e)
