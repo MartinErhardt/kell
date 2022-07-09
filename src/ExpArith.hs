@@ -15,14 +15,14 @@
 module ExpArith(
   expandArith
 )where
-
+import ShCommon(ShellError(..))
 import ShCommon
 
 import Data.Bits
 import Text.Parsec
 import Text.Parsec.String (Parser)
 import Control.Monad.Trans.Class
-
+import Control.Monad.Trans.Except
 import qualified Data.Map as Map
 import qualified Text.Parsec.Language as Lang
 import qualified Text.Parsec.Expr as Ex
@@ -69,13 +69,13 @@ lexer = Tok.makeTokenParser style
          }
 
 numb :: AParser Int
-numb      = Tok.natural lexer    >>= return . fromIntegral
+numb = Tok.natural lexer >>= return . fromIntegral
 
 getVal :: String -> AParser Int
 getVal name = (lift . getVar) name >>= handleVar
   where handleVar v = case v of (Just v) -> case Rd.readMaybe v of (Just n) -> return n
-                                                                   _        -> unexpected("no integer")
-                                _        -> unexpected("var does not exist")
+                                                                   _        -> unexpected $ name ++ " not a number"
+                                _        -> return 0 -- unexpected $ name ++ " unset"
 
 getVarVal :: AParser Int
 getVarVal = Tok.identifier lexer >>= getVal
@@ -102,14 +102,10 @@ expr = Ex.buildExpressionParser table baseExpr
   where table =( (((flip Ex.Infix $ Ex.AssocLeft) . getOp)  <$>) <$> bOpMap) ++ (((Ex.Prefix . getOp) <$>) <$> uOpMap)
 
 parseExpr :: AParser Int
-parseExpr = do
-  Tok.whiteSpace lexer
-  r <- expr
-  eof
-  return r
+parseExpr = Tok.whiteSpace lexer *> expr <* eof
 
 expandArith :: String -> Shell String
 expandArith s = do
-  res <- runParserT parseExpr () "arith" s
-  case res of (Right s) -> return . show $ s
-              _         -> return "" -- TODO throw error
+  res <- runParserT parseExpr () "arithmetic expansion" s
+  case res of Right s -> return . show $ s
+              Left e  -> throwE . ExpErr $ s ++ ": syntax error: " ++ (show e)

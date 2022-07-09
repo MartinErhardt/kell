@@ -77,9 +77,10 @@ runWhileLoop (WhileLoop cond body) = runSepList cond >>= handler ExitSuccess
 runCmd :: Cmd -> Shell ExitCode
 runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleCmdErr
                                CCmd cmd redirs -> runCCmd cmd redirs
-  where handleCmdErr exit = do
+  where printDiag msg = (liftIO . putStrLn $ "kell: " ++ msg)
+        handleCmdErr exit = do
           ia <- interactive <$> (lift get)
-          case exit of ExpErr msg -> if ia then (liftIO $ putStrLn msg) >> (return $ ExitFailure 1) else throwE exit
+          case exit of ExpErr msg -> printDiag msg >> if ia then (return $ ExitFailure 1) else throwE exit
         runCCmd cmd redirs = do
           ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
           exitCode <- catchE (runCmpCmd cmd) handleCmdErr

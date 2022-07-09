@@ -60,23 +60,25 @@ expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter
         sec   (_, x, _) = x
         third (_ ,_ ,x) = x
         actionT :: [(String, (String -> String -> String, String -> String -> Shell String, String -> String -> Shell String))]
-        actionT = [("-",  ((\p w -> p), (\p w -> return w),     (\p w -> return w) ))
-                  ,("-",  ((\p w -> p), (\p w -> return ""),    (\p w -> return w) ))
-                  ,(":=", ((\p w -> p), assignW,                assignW ))
-                  ,("=",  ((\p w -> p), (\p w -> return ""),    assignW ))
-                  ,(":?", ((\p w -> p), raiseExpErr "var null", raiseExpErr "var not found" )) --TODO throw error
-                  ,("?",  ((\p w -> p), assignW,                raiseExpErr "var not found" )) --TODO throw error
-                  ,(":+", ((\p w -> w), (\p w -> return ""),    (\p w -> return "")))
-                  ,("+",  ((\p w -> w), (\p w -> return w),     (\p w -> return "")))]
+        actionT = [("-",  ((\p w -> p), (\p w -> return w),  (\p w -> return w) ))
+                  ,("-",  ((\p w -> p), (\p w -> return ""), (\p w -> return w) ))
+                  ,(":=", ((\p w -> p), assignW,             assignW ))
+                  ,("=",  ((\p w -> p), (\p w -> return ""), assignW ))
+                  ,(":?", ((\p w -> p), raiseExpErr vnull,   raiseExpErr vunset )) --TODO throw error
+                  ,("?",  ((\p w -> p), assignW,             raiseExpErr vunset )) --TODO throw error
+                  ,(":+", ((\p w -> w), (\p w -> return ""), (\p w -> return "")))
+                  ,("+",  ((\p w -> w), (\p w -> return w),  (\p w -> return "")))]
         extractAction split f = case Map.lookup split (Map.fromList actionT) of Just triple -> f triple
         applyAction :: String -> String -> Maybe String -> String -> Shell String
         applyAction split name p w = case p of Nothing   -> (extractAction split third ) name w
                                                Just ""   -> (extractAction split sec   ) name w
                                                Just sub  -> return $ (extractAction split first) sub w
         expandTo (p, split, w) = join $ applyAction split p <$> getVar p <*> expandNoSplit launcher w
-        raiseExpErr msg p w = throwE . ExpErr $ msg ++ ": " ++ p
+        vnull  = "parameter null"
+        vunset = "parameter not set"
+        raiseExpErr msg p w = throwE . ExpErr $ p ++ ": " ++ msg -- bash for unit tests
         handleParseOutput p = case p of Right triple -> expandTo triple
-                                        _            -> return ""
+                                        Left e       -> throwE . ExpErr $ toExp ++ ": syntax error: " ++ show e
 
 fieldExpand :: String -> Shell [Field]
 fieldExpand s = getVar "IFS" >>= return . ifsHandler >>= (flip parse2Shell) s . split2F
@@ -122,7 +124,8 @@ parseExps doFExps names = (eof >> return [])
         <|> (char '$'  >>((++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getVExp names    <*> parseExps doFExps names
                       <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getExp "{" "}"   <*> parseExps doFExps names
                       <|> (++) . (:[]) . (ExpTok ArithExp doFExps)       <$> getExp "((" "))" <*> parseExps doFExps names
-                      <|> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> getExp "(" ")"   <*> parseExps doFExps names ) )
+                      <|> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> getExp "(" ")"   <*> parseExps doFExps names
+		      <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> parseXBDName     <*> parseExps doFExps names) )
         <|> (char '`'  >> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> bQuoteRem        <*> parseExps doFExps names )
         <|> (char '\'' >> (++) . (:[]) . (ExpTok NoExp False) . enc '\'' <$> quoteRem         <*> parseExps doFExps names )
         <|> (char '"'  >> (++) . processDQuote                           <$> dQuoteRem        <*> parseExps doFExps names )
