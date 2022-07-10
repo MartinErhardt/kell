@@ -2,7 +2,7 @@
 [![][license img]][license] 
 
 # kell
-This is a [POSIX](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_03) shell written in Haskell.
+This is a [POSIX](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html) shell written in Haskell.
 ## Try it out
 Just type
 ```
@@ -12,7 +12,7 @@ cabal install
 kell
 ```
 ## Features
-The following the features are implemented
+The following features are implemented
 - Line based Interpreter
   - parses a line and if it the parser fails with unexpected end of input tries to fetch an additional one
   - distinguish interactive mode (prompt and no exit on a large class of errors)
