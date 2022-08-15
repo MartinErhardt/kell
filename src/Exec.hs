@@ -11,6 +11,8 @@
 --   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 --   See the License for the specific language governing permissions and
 --   limitations under the License.
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Exec
 (
  runPipe, runSmpCmd, runAndOr, runSepList,
@@ -40,6 +42,9 @@ import System.Posix.IO(OpenFileFlags(..))
 import System.IO
 import System.Exit
 import Control.Monad
+import GHC.IO.Exception(IOException(..))
+import GHC.IO.Exception(IOErrorType(..))
+import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.Class
@@ -50,6 +55,7 @@ import System.Posix.Types(ProcessID, Fd(..),FileMode)
 import Data.Int(Int32(..))
 import System.Posix.Files
 import System.Exit
+import Foreign.C.Error
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
@@ -108,7 +114,7 @@ runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
         finalActions ps ev = zipWith (runAction ev) (createRedirL ps) pipeline
 
 runAndOr :: AndOrList -> Shell ExitCode
-runAndOr [(pipe,EOF)] = runPipe pipe
+runAndOr [(pipe,Lexer.EOF)] = runPipe pipe
 runAndOr andOrL = case head andOrL of (p,AND_IF) -> runPipe p >>= dropIf (/=ExitSuccess)
                                       (p,OR_IF)  -> runPipe p >>= dropIf (==ExitSuccess)
     where dropIf cond ec = if cond ec then 
@@ -155,8 +161,14 @@ waitToExitCode pid = do
 launchCmd :: FilePath -> [String] -> Shell () -> Shell ExitCode
 launchCmd cmd args prepare = do 
   forkedPId <- lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ prepare >> liftIO runInCurEnv)
-  waitToExitCode forkedPId
-  where runInCurEnv = getEnvironment >>= (executeFile cmd True args) . Just
+  e <- waitToExitCode forkedPId
+  -- liftIO $ print e
+  return e
+  where execHandler (Left (e :: IOException)) = case ioe_type e of PermissionDenied  -> exitImmediately $ ExitFailure 126
+                                                                   NoSuchThing       -> exitImmediately $ ExitFailure 127
+                                                                   _                 -> exitImmediately $ ExitFailure 125
+        runUnchecked = getEnvironment >>= (executeFile cmd True args) . Just 
+        runInCurEnv = (Control.Exception.try $ runUnchecked) >>= execHandler
 
 doAssign :: (String,String) -> Shell ()
 doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name

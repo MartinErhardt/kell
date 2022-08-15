@@ -125,7 +125,7 @@ parseExps doFExps names = (eof >> return [])
                       <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> getExp "{" "}"   <*> parseExps doFExps names
                       <|> (++) . (:[]) . (ExpTok ArithExp doFExps)       <$> getExp "((" "))" <*> parseExps doFExps names
                       <|> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> getExp "(" ")"   <*> parseExps doFExps names
-		      <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> parseXBDName     <*> parseExps doFExps names) )
+                      <|> (++) . (:[]) . (ExpTok ParamExp doFExps)       <$> parseXBDName     <*> parseExps doFExps names) )
         <|> (char '`'  >> (++) . (:[]) . (ExpTok CmdExp   doFExps)       <$> bQuoteRem        <*> parseExps doFExps names )
         <|> (char '\'' >> (++) . (:[]) . (ExpTok NoExp False) . enc '\'' <$> quoteRem         <*> parseExps doFExps names )
         <|> (char '"'  >> (++) . processDQuote                           <$> dQuoteRem        <*> parseExps doFExps names )

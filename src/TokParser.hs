@@ -109,9 +109,8 @@ oneOfOp ops = tokenPrim show nextPosTok checkTok
 getAssignWord :: TokParser (String,String)
 getAssignWord = tokenPrim show nextPosW ((>>= isAssignWord) . testWord)
   where isAssignWord = c2Maybe . (parse parseAssignWord "assignWord")
-          where c2Maybe res = case res of Right t  -> Just t
-                                          Left _   -> Nothing
-
+        c2Maybe res = case res of Right t  -> Just t
+                                  Left _   -> Nothing
         parseAssignWord = (,) <$> parseXBDName <* char '=' <*> many anyChar
 
 getIONr :: TokParser Int

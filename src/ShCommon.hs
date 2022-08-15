@@ -130,6 +130,8 @@ data ShellError = SyntaxErr      String
                 | CmdNotFoundErr String
                   deriving(Show)
 
+--shellErrorCode = [ ]
+
 type Shell = ExceptT ShellError (StateT ShellEnv IO)
 
 getVar :: String -> Shell (Maybe String)
