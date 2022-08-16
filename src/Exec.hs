@@ -51,6 +51,7 @@ import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
 import Data.Bits
+import System.Posix.Internals
 import System.Posix.Types(ProcessID, Fd(..),FileMode)
 import Data.Int(Int32(..))
 import System.Posix.Files
@@ -86,8 +87,12 @@ runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleC
   where printDiag msg = (liftIO . putStrLn $ "kell: " ++ msg)
         handleCmdErr exit = do
           ia <- interactive <$> (lift get)
-          case exit of ExpErr msg            -> printDiag msg >> if ia then (return $ ExitFailure 1) else throwE exit
-                       CmdNotFoundErr msg ec -> printDiag msg >> if ia then (return ec) else throwE exit
+          case exit of ExpErr msg            -> printDiag msg >> if ia then return () else throwE exit
+                       RedirUErr msg         -> printDiag msg
+		       -- this can happen in command substitutions
+                       SyntaxErr msg         -> printDiag msg >> if ia then return () else throwE exit
+                       CmdNotFoundErr msg ec -> printDiag msg >> if ia then return () else throwE exit
+          return $ getErrExitCode exit
         runCCmd cmd redirs = do
           ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
           exitCode <- catchE (runCmpCmd cmd) handleCmdErr
@@ -143,12 +148,11 @@ getDefaultShellEnv interactive = do
 
 exec :: TokParser a -> (a -> Shell ExitCode) -> String -> Shell ExitCode
 exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
-                                                                             (Left err)  -> liftIO $ errorMsg err
-                                        (Left err)  -> liftIO $ errorMsg err
+                                                                             (Left err)  -> (throwE . SyntaxErr) (show err)
+                                        (Left err)  -> (throwE . SyntaxErr) (show err)
   where toks :: Either ParseError [Token]
         toks = parse lexer "subshell" cmd
         parse2Ast tokens = parse parser "tokenstreamsubshell" tokens
-        errorMsg err = print err >> (return $ ExitFailure 1)
 
 execCmd :: String -> Shell ExitCode
 execCmd = exec parseSub runSepList
@@ -177,14 +181,23 @@ doAssign :: (String,String) -> Shell ()
 doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 
 doRedirect :: Redirect -> Shell (IO Fd)
-doRedirect (Redirect tok fd path) = do expandedPath <- expandNoSplit execCmd path
-                                       lift get >>= liftIO . (getAction tok fd expandedPath) . shFMode
+doRedirect (Redirect tok fd path) = do liftIO $ print fd
+                                       expandedPath <- expandNoSplit execCmd path
+                                       lift get >>= (getAction tok fd expandedPath) . shFMode
   where truncOFlag   = (OpenFileFlags False False False False True)
         noFlag       = (OpenFileFlags False False False False False)
         appendOFlag  = (OpenFileFlags True  False False False False)
         change2Fd fd = (<*) <$> (flip dupTo) fd <*> closeFd
-        restoreOpen fd action = dup fd <* (action >>= change2Fd fd) >>= return . (change2Fd fd)
-        str2Fd = Fd . fromIntegral . Rd.read
+        -- if fd exists duplicate fd to a intermediate filedescriptor
+	restoreOpenEx fd action = dup fd <* (action >>= change2Fd fd ) >>= return . (change2Fd fd)
+	-- if fd does not exist, we can just directly use fd
+	restoreOpenNoEx fd action = (action >>= change2Fd fd) >> (return $ closeFd fd >> return fd)
+        -- TODO only catch dup fd
+	restoreOpen fd action = liftIO $ catch (restoreOpenEx fd action) (\(_ :: IOException) -> restoreOpenNoEx fd action)
+        redirFds fd1 fd2 modes = do
+          mode <- liftIO $ fdGetMode fd2
+          if mode `elem` modes then (liftIO $ dupTo fd1 (Fd fd2)) >> (return $ (dupTo (Fd fd2) fd1))
+                               else throwE . RedirUErr $ (show fd2) ++ ": (Permission denied)"
         -- handle Redirection errors
         redirAction = [(LESS,      (\fd path m -> restoreOpen fd (openFd path ReadOnly  (Just m) noFlag      )))
                       ,(GREAT,     (\fd path m -> restoreOpen fd (openFd path WriteOnly (Just m) truncOFlag  ))) --TODO case file exists and noclobber opt
@@ -192,7 +205,7 @@ doRedirect (Redirect tok fd path) = do expandedPath <- expandNoSplit execCmd pat
                       ,(DGREAT,    (\fd path m -> restoreOpen fd (openFd path WriteOnly (Just m) appendOFlag )))
                       -- TODO DLESS
                       ,(LESSGREAT, (\fd path m -> restoreOpen fd (openFd path ReadWrite (Just m) noFlag      )))
-                      ,(LESSAND,   (\fd1 fd2 m -> dupTo (str2Fd fd2) fd1 >>= return . ((flip dupTo) (str2Fd fd2)) ))
-                      ,(GREATAND,  (\fd1 fd2 m -> dupTo fd1 (str2Fd fd2) >>= return . dupTo fd ))]
+                      ,(LESSAND,   (\fd1 fd2 m -> redirFds fd1 (fromIntegral $ Rd.read fd2) [ReadMode, ReadWriteMode] ))
+                      ,(GREATAND,  (\fd1 fd2 m -> redirFds fd1 (fromIntegral $ Rd.read fd2) [WriteMode, AppendMode, ReadWriteMode] ))]
         getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents
 

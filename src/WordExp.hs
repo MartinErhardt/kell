@@ -44,17 +44,21 @@ launchCmdSub launcher cmd = do
   forkedPId <- liftIO . forkProcess $ do
     closeFd . fst $ pipe
     dupTo (snd pipe) stdOutput
-    evalStateT (runExceptT $ launcher cmd) curEnv
+    --FIXME 'echo $(if;)' parse2Ast in parent
+    res <- (evalStateT (runExceptT $ launcher cmd) curEnv)
+    case res of Right ec -> exitImmediately ec
+                Left err -> (exitImmediately . getErrExitCode) err
     return ()
   liftIO $ closeFd . snd $ pipe
   liftIO $ getProcessStatus False False forkedPId -- TODO Error handling
   liftIO $ ( (fdToHandle . fst $ pipe) >>= hGetContents >>= return . reverse . dropWhile (=='\n') . reverse)
 
 expandParams :: (String -> Shell ExitCode) -> String -> Shell String
-expandParams launcher toExp = handleParseOutput $ parse parseParamExp "parameter expansion" toExp
-  where parseSplit = foldl1 (<|>) ( try . string . fst <$> actionT) <|> return "-"
+expandParams launcher toExp = do
+  handleParseOutput $ parse parseParamExp "parameter expansion" toExp
+  where parseSplit = foldl1 (<|>) ( try . string . fst <$> actionT)
         parseParamExp :: Parser (String, String, String)
-        parseParamExp = (, , ) <$> parseXBDName <*> parseSplit <*> many anyChar
+        parseParamExp =  try ((, , ) <$> parseXBDName <*> parseSplit <*> many anyChar) <|> ((,"-","") <$> parseXBDName <* eof)
         assignW p w = putVar p w >> return w
         first (x ,_, _) = x
         sec   (_, x, _) = x
