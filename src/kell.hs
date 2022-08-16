@@ -66,10 +66,8 @@ main = do
   where handlePArgs pArgs = case pArgs of Right pa -> return pa
                                           Left e   -> print e >> (exitWith $ ExitFailure 1) >> (return $ PArgs "" None [])
         exitHandler :: Either ShellError ExitCode -> IO ExitCode
-        exitHandler exit = case exit of Right e                       -> return e
-                                        Left (CmdNotFoundErr msg ec ) -> return ec
-                                        Left (SyntaxErr m)            -> return $ ExitFailure 124
-                                        Left  _                       -> return $ ExitFailure 125
+        exitHandler exit = case exit of Right ec -> return ec
+                                        Left e   -> return $ getErrExitCode e
 
 type ArgParser = Parsec [String] ()
 
@@ -111,7 +109,7 @@ interprete lineGetter lastEC = do
   ia <- (lift get) >>= return . interactive
   when ia (printPrompt "$PS1") >> liftIO lineGetter >>= handleFetch ia
   where handleExec ia res = case res of Right ec -> interprete lineGetter ec
-                                        Left  e  -> if ia then interprete lineGetter (ExitFailure 1) -- TODO ShellError2EC
+                                        Left  e  -> if ia then interprete lineGetter (getErrExitCode $ SyntaxErr (show e))
                                                           else throwE $ SyntaxErr (show e)
         escNLn cmd = if last cmd == '\\' then tail $ tail cmd else cmd
         handleFetch ia lnew = case lnew of Right s -> Control.Monad.Trans.Except.tryE (interpreteCmd lineGetter (escNLn s)) >>= handleExec ia

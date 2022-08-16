@@ -24,6 +24,7 @@ module ShCommon(
   quoteEsc,
   dQuote,
   getDollarExp,
+  getErrExitCode,
   parseXBDName
 )
 where
@@ -121,7 +122,7 @@ data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
                          } deriving(Eq, Show)
 data ShellError = SyntaxErr      String
                 | SBIErr
-                | UtilErr
+                | UtilErr        ExitCode
                 | RedirSBIErr    String
                 | RedirCmpCmdErr String
                 | RedirFuncErr   String
@@ -131,7 +132,17 @@ data ShellError = SyntaxErr      String
                 | CmdNotFoundErr String ExitCode
                   deriving(Show)
 
---shellErrorCode = [ ]
+getErrExitCode :: ShellError -> ExitCode
+getErrExitCode e = case e of SyntaxErr _         -> ExitFailure 117
+                             SBIErr              -> ExitFailure 118
+                             UtilErr e           -> e
+                             RedirSBIErr _       -> ExitFailure 119
+                             RedirCmpCmdErr _    -> ExitFailure 120
+                             RedirFuncErr _      -> ExitFailure 121
+                             RedirUErr _         -> ExitFailure 122
+                             AssignErr _         -> ExitFailure 123
+                             ExpErr _            -> ExitFailure 124
+                             CmdNotFoundErr _ ec -> ec
 
 type Shell = ExceptT ShellError (StateT ShellEnv IO)
 
