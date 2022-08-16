@@ -86,7 +86,8 @@ runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleC
   where printDiag msg = (liftIO . putStrLn $ "kell: " ++ msg)
         handleCmdErr exit = do
           ia <- interactive <$> (lift get)
-          case exit of ExpErr msg -> printDiag msg >> if ia then (return $ ExitFailure 1) else throwE exit
+          case exit of ExpErr msg            -> printDiag msg >> if ia then (return $ ExitFailure 1) else throwE exit
+	               CmdNotFoundErr msg ec -> printDiag msg >> if ia then (return ec) else throwE exit
         runCCmd cmd redirs = do
           ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
           exitCode <- catchE (runCmpCmd cmd) handleCmdErr
@@ -162,8 +163,10 @@ launchCmd :: FilePath -> [String] -> Shell () -> Shell ExitCode
 launchCmd cmd args prepare = do 
   forkedPId <- lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ prepare >> liftIO runInCurEnv)
   e <- waitToExitCode forkedPId
-  -- liftIO $ print e
-  return e
+  case e of ExitFailure 126 -> throwE $ CmdNotFoundErr (cmd ++ ": (Permission denied)")         e
+            ExitFailure 127 -> throwE $ CmdNotFoundErr (cmd ++ ": (No such file or directory)") e
+            ExitFailure 125 -> throwE $ CmdNotFoundErr (cmd ++ ": (Unknown)") e
+            _               -> return e
   where execHandler (Left (e :: IOException)) = case ioe_type e of PermissionDenied  -> exitImmediately $ ExitFailure 126
                                                                    NoSuchThing       -> exitImmediately $ ExitFailure 127
                                                                    _                 -> exitImmediately $ ExitFailure 125

@@ -55,17 +55,20 @@ data PArgs = PArgs { opts        :: String
                    , args        :: [String] }deriving (Eq,Show)
 type ArgError = String
 
-main :: IO ExitCode
+main :: IO ()
 main = do
   args  <- getArgs
   pArgs <- handlePArgs $ parse parseArgs "args" args
   shEnv <- getDefaultShellEnv $ ('i' `elem` opts pArgs) || (script pArgs == None)
-  evalStateT (runExceptT $ execInterpreter pArgs) shEnv >>= exitHandler
+  res <- evalStateT (runExceptT $ execInterpreter pArgs) shEnv >>= exitHandler
+  print res
+  exitImmediately res
   where handlePArgs pArgs = case pArgs of Right pa -> return pa
                                           Left e   -> print e >> (exitWith $ ExitFailure 1) >> (return $ PArgs "" None [])
         exitHandler :: Either ShellError ExitCode -> IO ExitCode
-        exitHandler exit = case exit of Right e -> return e
-                                        Left  e -> return $ ExitFailure 1
+        exitHandler exit = case exit of Right e                       -> return e
+					Left (CmdNotFoundErr msg ec ) -> return ec
+                                        Left  _                       -> return $ ExitFailure 125
 
 type ArgParser = Parsec [String] ()
 

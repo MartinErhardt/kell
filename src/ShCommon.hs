@@ -38,6 +38,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import System.Posix.Types(Fd(..),FileMode)
 import System.Posix.Files
+import System.Exit
 import System.Environment
 
 data Token = Word String
@@ -127,7 +128,7 @@ data ShellError = SyntaxErr      String
                 | RedirUErr      String
                 | AssignErr      String
                 | ExpErr         String
-                | CmdNotFoundErr String
+                | CmdNotFoundErr String ExitCode
                   deriving(Show)
 
 --shellErrorCode = [ ]
