@@ -87,7 +87,7 @@ runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleC
         handleCmdErr exit = do
           ia <- interactive <$> (lift get)
           case exit of ExpErr msg            -> printDiag msg >> if ia then (return $ ExitFailure 1) else throwE exit
-	               CmdNotFoundErr msg ec -> printDiag msg >> if ia then (return ec) else throwE exit
+                       CmdNotFoundErr msg ec -> printDiag msg >> if ia then (return ec) else throwE exit
         runCCmd cmd redirs = do
           ioReversals <- foldl (\a1 a2 -> (flip (>>)) <$> a1 <*> a2) (return $ return stdOutput) (doRedirect <$> redirs)
           exitCode <- catchE (runCmpCmd cmd) handleCmdErr

@@ -2,5 +2,5 @@
 *.hi
 kell
 *.swp
-'.swo
+*.swo
 dist-newstyle/*

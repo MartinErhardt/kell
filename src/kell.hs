@@ -67,7 +67,8 @@ main = do
                                           Left e   -> print e >> (exitWith $ ExitFailure 1) >> (return $ PArgs "" None [])
         exitHandler :: Either ShellError ExitCode -> IO ExitCode
         exitHandler exit = case exit of Right e                       -> return e
-					Left (CmdNotFoundErr msg ec ) -> return ec
+                                        Left (CmdNotFoundErr msg ec ) -> return ec
+                                        Left (SyntaxErr m)            -> return $ ExitFailure 124
                                         Left  _                       -> return $ ExitFailure 125
 
 type ArgParser = Parsec [String] ()
@@ -95,43 +96,38 @@ execInterpreter args =
                                             exitCode <- interprete (getLn handle) ExitSuccess
                                             liftIO $ hClose handle
                                             return exitCode
-                      FromOp str name  -> (failOnParseE <$> interpreteCmd noMoreLn str)
+                      FromOp str name  -> interpreteCmd noMoreLn str
                       -- start interactive if stdin empty
                       FromStdIn        -> interprete (getLn stdin) ExitSuccess
                       None             -> interprete (getLn stdin) ExitSuccess
   where noMoreLn = return . Left $ userError "end of input"
         getLn handle = Ex.try $ ((++"\n") <$> hGetLine handle) -- dont pp if EOF
---  where interactiveM = 'i' `elem` opts args
 
 printPrompt :: String -> Shell ()
 printPrompt var = liftIO (hFlush stdout) >> expandNoSplit execCmd var >>= liftIO . putStr >> liftIO (hFlush stdout)
-
-failOnParseE :: (Either ParseError ExitCode) -> ExitCode
-failOnParseE status = case status of (Right ec) -> ec
-                                     _          -> ExitFailure 1
 
 interprete :: IO (Either IOError String) -> ExitCode -> Shell ExitCode
 interprete lineGetter lastEC = do
   ia <- (lift get) >>= return . interactive
   when ia (printPrompt "$PS1") >> liftIO lineGetter >>= handleFetch ia
-  where handleExec ia res = if ia then             interprete lineGetter (failOnParseE res)
-                         else case res of Right ec -> interprete lineGetter ec
-                                          Left  e  -> (return $ ExitFailure 1)
+  where handleExec ia res = case res of Right ec -> interprete lineGetter ec
+                                        Left  e  -> if ia then interprete lineGetter (ExitFailure 1) -- TODO ShellError2EC
+                                                          else throwE $ SyntaxErr (show e)
         escNLn cmd = if last cmd == '\\' then tail $ tail cmd else cmd
-        handleFetch ia lnew = case lnew of Right s -> interpreteCmd lineGetter (escNLn s) >>= handleExec ia
+        handleFetch ia lnew = case lnew of Right s -> Control.Monad.Trans.Except.tryE (interpreteCmd lineGetter (escNLn s)) >>= handleExec ia
                                            Left  e -> return lastEC
 
-interpreteCmd :: IO (Either IOError String) -> String -> Shell (Either ParseError ExitCode)
+interpreteCmd :: IO (Either IOError String) -> String -> Shell ExitCode
 interpreteCmd lineGetter curCmd = do
   ia <- interactive <$> (lift get)
-  case toks of Right v -> case parse2AST v of Right ast -> runSepList ast >>= return . Right
+  case toks of Right v -> case parse2AST v of Right ast -> runSepList ast
                                               Left e    -> handleErrs ia "EOF" e
                Left e  -> handleErrs ia "eof" e
   where parse2AST   = parse parseToks "tokenstream"
         toks        = parse lexer "charstream" curCmd
         incompleteFetch eOld oldLn newLn = case newLn of Right s -> interpreteCmd lineGetter (oldLn++s)
-                                                         Left e  -> return $ Left eOld
+                                                         Left e  -> throwE $ SyntaxErr (show eOld)
         incomplete ia e str     = when ia (printPrompt "$PS2") >> liftIO lineGetter >>= incompleteFetch e str
         handleErrs ia eofT e = if [eofT,""] `L.intersect` (messageString <$> errorMessages e) /= []
                                  then incomplete ia e curCmd
-                               else (liftIO $ print e ) >> (return $ Left e)
+                               else (liftIO $ print e ) >> (throwE $ SyntaxErr (show e))
