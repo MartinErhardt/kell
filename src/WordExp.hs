@@ -19,6 +19,7 @@ module WordExp(
 import ShCommon
 import ShCommon(ShellError(..))
 import ExpArith
+import Patterns
 
 import Control.Monad.IO.Class
 import Control.Monad
@@ -166,8 +167,10 @@ expandWord launcher split cmdWord = do
 -- TODO expandedPNFields <- Pathname expansion
 -- how to exploit my shell? on command substitution print to stdout ['\0','\0', 'f'] -> profit
 -- expand split2F to accept [String] aa field seperator
+  fsPathExpanded <- liftIO $ concat <$> mapM expandPath fs
+  -- liftIO $ print fsPathExpanded
   -- lift $ print fs
-  noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ filter (/="") fs)
+  noQuotes <- parse2Shell removeQuotes ( concat . L.intersperse ['\xff'] $ filter (/="") fsPathExpanded)
   -- lift $ putStrLn noQuotes
   res <- parse2Shell removeEscReSplit noQuotes-- TODO expandedPNFields <- Pathname expansion
   -- lift $ print res

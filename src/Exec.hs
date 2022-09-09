@@ -89,7 +89,7 @@ runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleC
           ia <- interactive <$> (lift get)
           case exit of ExpErr msg            -> printDiag msg >> if ia then return () else throwE exit
                        RedirUErr msg         -> printDiag msg
-		       -- this can happen in command substitutions
+                       -- this can happen in command substitutions
                        SyntaxErr msg         -> printDiag msg >> if ia then return () else throwE exit
                        CmdNotFoundErr msg ec -> printDiag msg >> if ia then return () else throwE exit
           return $ getErrExitCode exit
@@ -189,11 +189,11 @@ doRedirect (Redirect tok fd path) = do liftIO $ print fd
         appendOFlag  = (OpenFileFlags True  False False False False)
         change2Fd fd = (<*) <$> (flip dupTo) fd <*> closeFd
         -- if fd exists duplicate fd to a intermediate filedescriptor
-	restoreOpenEx fd action = dup fd <* (action >>= change2Fd fd ) >>= return . (change2Fd fd)
-	-- if fd does not exist, we can just directly use fd
-	restoreOpenNoEx fd action = (action >>= change2Fd fd) >> (return $ closeFd fd >> return fd)
+        restoreOpenEx fd action = dup fd <* (action >>= change2Fd fd ) >>= return . (change2Fd fd)
+        -- if fd does not exist, we can just directly use fd
+        restoreOpenNoEx fd action = (action >>= change2Fd fd) >> (return $ closeFd fd >> return fd)
         -- TODO only catch dup fd
-	restoreOpen fd action = liftIO $ catch (restoreOpenEx fd action) (\(_ :: IOException) -> restoreOpenNoEx fd action)
+        restoreOpen fd action = liftIO $ catch (restoreOpenEx fd action) (\(_ :: IOException) -> restoreOpenNoEx fd action)
         redirFds fd1 fd2 modes = do
           mode <- liftIO $ fdGetMode fd2
           if mode `elem` modes then (liftIO $ dupTo fd1 (Fd fd2)) >> (return $ (dupTo (Fd fd2) fd1))
