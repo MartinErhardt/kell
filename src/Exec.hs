@@ -101,6 +101,7 @@ runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleC
 runCmpCmd :: CmpCmd -> Shell ExitCode
 runCmpCmd (IfCmp clause) = runIfClause  clause
 runCmpCmd (WhlCmp loop ) = runWhileLoop loop
+runCmpCmd (BrGroup list) = runSepList list
 
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
@@ -147,12 +148,14 @@ getDefaultShellEnv interactive = do
                      ,("SHELL",("kell",True ))]
 
 exec :: TokParser a -> (a -> Shell ExitCode) -> String -> Shell ExitCode
-exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
+exec parser executor cmd = case toks of (Right val) -> do
+                                                         possibleAst <- parse2Ast val
+                                                         case possibleAst of (Right ast) -> executor ast
                                                                              (Left err)  -> (throwE . SyntaxErr) (show err)
                                         (Left err)  -> (throwE . SyntaxErr) (show err)
   where toks :: Either ParseError [Token]
         toks = parse lexer "subshell" cmd
-        parse2Ast tokens = parse parser "tokenstreamsubshell" tokens
+        parse2Ast tokens = runParserT parser () "tokenstreamsubshell" tokens
 
 execCmd :: String -> Shell ExitCode
 execCmd = exec parseSub runSepList

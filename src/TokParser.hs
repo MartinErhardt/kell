@@ -52,14 +52,14 @@ data IfClause = IfClause { clauses :: [(SepList, SepList)]
 data WhileLoop = WhileLoop SepList SepList deriving(Eq,Show)
 data Cmd      = SCmd SmpCmd | CCmd CmpCmd [Redirect] deriving(Eq, Show)
 --data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
-data CmpCmd   = IfCmp IfClause | WhlCmp WhileLoop deriving(Eq,Show)
+data CmpCmd   = BrGroup SepList | IfCmp IfClause | WhlCmp WhileLoop deriving(Eq,Show)
 --data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
 
 type Pipeline  = [Cmd]
 type AndOrList = [(Pipeline, Token)] -- Last Token has no meaning
 type SepList   = [(AndOrList,Token)]
 
-type TokParser = Parsec [Token] ()
+type TokParser a = ParsecT [Token] () Shell a
 
 testWord :: Token -> Maybe String
 testWord tok = case tok of Word w -> Just w
@@ -171,6 +171,7 @@ parseCmd = (parseSmpCmd >>= return . SCmd) <|> CCmd <$> parseCmpCmd <*> many par
 parseCmpCmd :: TokParser CmpCmd
 parseCmpCmd = (parseIfClause "if" >>= return . IfCmp )
           <|> (parseWhileLoop     >>= return . WhlCmp)
+          <|> (resWord "{" *> (parseCmpList >>= return . BrGroup) <* resWord "}")
 
 parseAndOrList :: TokParser AndOrList
 parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
