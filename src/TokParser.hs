@@ -17,15 +17,10 @@ module TokParser
   parseToks,
   parseSub,
   TokParser,
-  Cmd(..), CmpCmd(..), SmpCmd, Pipeline, AndOrList, SepList, IfClause, WhileLoop(..),
-  clauses, else_part,
-  cmdWords,
-  assign,
-  Redirect(Redirect),
-  redirects
 ) where
 import Lexer (Token (..))
 import ShCommon
+import ShCommon (SmpCmd(..), FuncDef(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), WhileLoop(..), Redirect(..))
 
 import qualified Text.Read as Rd
 import Text.Parsec
@@ -41,25 +36,9 @@ import qualified Data.Map as Map
 import Control.Monad
 import Data.Functor
 
-data Redirect = Redirect Token Fd String deriving (Eq,Show)
-data SmpCmd = SmpCmd { redirects ::  [Redirect]
-                     , assign :: [(String,String)]
-                     , cmdWords :: [String]
-                     } deriving(Eq, Show)
-data IfClause = IfClause { clauses :: [(SepList, SepList)]
-                         , else_part :: Maybe SepList
-                         } deriving(Eq,Show)
-data WhileLoop = WhileLoop SepList SepList deriving(Eq,Show)
-data Cmd      = SCmd SmpCmd | CCmd CmpCmd [Redirect] deriving(Eq, Show)
---data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
-data CmpCmd   = BrGroup SepList | IfCmp IfClause | WhlCmp WhileLoop deriving(Eq,Show)
---data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
 
-type Pipeline  = [Cmd]
-type AndOrList = [(Pipeline, Token)] -- Last Token has no meaning
-type SepList   = [(AndOrList,Token)]
 
-type TokParser a = ParsecT [Token] () Shell a
+type TokParser = Parsec [Token] ()
 
 testWord :: Token -> Maybe String
 testWord tok = case tok of Word w -> Just w
@@ -94,9 +73,11 @@ reservedWords = [("{", Lbrace)
 getToken :: String -> Maybe Token
 getToken str = Map.lookup str (Map.fromList reservedWords) 
 
-getWord :: TokParser String
-getWord = tokenPrim show nextPosW ((>>= checkIfRes) . testWord)
+getWordC :: (String -> Maybe String) -> TokParser String
+getWordC extraCheck = tokenPrim show nextPosW ((>>= extraCheck ) . (>>= checkIfRes) . testWord)
   where checkIfRes w = guard (not $ w `elem` (fst <$> reservedWords)) $> w
+
+getWord = getWordC Just
 
 resWord :: String -> TokParser Token
 resWord tokStr = tokenPrim show nextPosW testIsTokStr
@@ -147,7 +128,8 @@ parseSmpCmd :: TokParser SmpCmd
 parseSmpCmd = addRedirect <$> try parseIORed <*> (parseSmpCmd <|> base)
           <|> addAssign   <$> getAssignWord  <*> (parseSmpCmd <|> base)
           <|> addWord     <$> getWord        <*>  parseSmpCmdSuf
-  where base = return $ SmpCmd [] [] []
+  where delimit = tokenPrim show nextPosTok (guard . (/=LBracket))
+        base = lookAhead delimit >> (return $ SmpCmd [] [] [] )
         addRedirect redir cmd = cmd {redirects = [redir]  ++ redirects cmd}
         addAssign strstr cmd =  cmd {assign    = [strstr] ++ assign cmd   }
         addWord str cmd =       cmd {cmdWords  = [str]    ++ cmdWords cmd }
@@ -166,7 +148,10 @@ parsePipe :: TokParser Pipeline
 parsePipe = (fst <$>) <$> parseList (return . (,EOF)) True [PIPE]          parseCmd
 
 parseCmd :: TokParser Cmd
-parseCmd = (parseSmpCmd >>= return . SCmd) <|> CCmd <$> parseCmpCmd <*> many parseIORed
+parseCmd = try( CCmd <$> parseCmpCmd <*> many parseIORed )
+        <|> try ( FCmd <$> parseFuncDef )
+        <|> try (parseSmpCmd >>= return . SCmd)
+        <|> FCmd <$> parseFuncDef
 
 parseCmpCmd :: TokParser CmpCmd
 parseCmpCmd = (parseIfClause "if" >>= return . IfCmp )
@@ -175,6 +160,12 @@ parseCmpCmd = (parseIfClause "if" >>= return . IfCmp )
 
 parseAndOrList :: TokParser AndOrList
 parseAndOrList =          parseList (return . (,EOF)) True [AND_IF, OR_IF] parsePipe
+
+parseFuncDef :: TokParser FuncDef
+parseFuncDef = FuncDef <$> getWordC funcDef <* (op LBracket >> op RBracket) <*> parseBody
+  where funcDef n = case parse parseXBDName "parsename" n of Right name -> Just name
+                                                             _         -> Nothing
+        parseBody = CCmd <$> ((many . op) NEWLINE *> parseCmpCmd) <*> many parseIORed
 
 parseSepList :: Bool -> [Token] -> TokParser SepList
 parseSepList nLs seps = parseList endCondition nLs seps parseAndOrList

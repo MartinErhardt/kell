@@ -83,8 +83,8 @@ getVarVal = Tok.identifier lexer >>= getVal
 getOp :: (String, a) -> AParser a
 getOp (op, f) = Tok.reservedOp lexer op >> return f
 
-assign :: AParser Int
-assign = do
+assignExp :: AParser Int
+assignExp = do
   toAssign <- Tok.identifier lexer
   opFunc   <- (foldl1 (<|>) (getOp <$> assignOps))
   oldval   <- getVal toAssign
@@ -95,7 +95,7 @@ assign = do
         assignOps = (++[("=",curry snd)]) . addEq . filter (\(s,_) -> s/= ">" && s/="<") $ concat bOpMap
 
 baseExpr :: AParser Int
-baseExpr = Tok.parens lexer expr <|> try(assign) <|> getVarVal <|> numb
+baseExpr = Tok.parens lexer expr <|> try(assignExp) <|> getVarVal <|> numb
 
 expr :: AParser Int
 expr = Ex.buildExpressionParser table baseExpr

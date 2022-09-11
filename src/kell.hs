@@ -118,12 +118,10 @@ interprete lineGetter lastEC = do
 interpreteCmd :: IO (Either IOError String) -> String -> Shell ExitCode
 interpreteCmd lineGetter curCmd = do
   ia <- interactive <$> (lift get)
-  case toks of Right v -> do
-                            possibleAst <- parse2AST v
-                            case possibleAst of Right ast -> runSepList ast
-                                                Left e    -> handleErrs ia "EOF" e
+  case toks of Right v -> case parse2AST v of Right ast -> runSepList ast
+                                              Left e    -> handleErrs ia "EOF" e
                Left e  -> handleErrs ia "eof" e
-  where parse2AST   = runParserT parseToks () "tokenstream"
+  where parse2AST   = parse parseToks "tokenstream"
         toks        = parse lexer "charstream" curCmd
         incompleteFetch eOld oldLn newLn = case newLn of Right s -> interpreteCmd lineGetter (oldLn++s)
                                                          Left e  -> throwE $ SyntaxErr (show eOld)

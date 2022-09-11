@@ -55,13 +55,13 @@ expandPathR restPath basePath = do
                    _  -> foldl (++) [] <$> (contentsFiltered >>= mapM (expandPathR restrest) )
   where midP   = takeWhile (/='/') restPath
         restrest  = (dropWhile (=='/') . dropWhile (/='/')) restPath
-	restSlash = (takeWhile (=='/') . dropWhile (/='/')) restPath
-	lookupHandler :: E.IOException -> IO [String]
-	lookupHandler e = return []
-	baseLookup = case basePath of "" -> "./"
-	                              _  -> basePath
-	lookupDir = E.catch (getDirectoryContents baseLookup) lookupHandler
-	isMatch = filter ((==) <$> ( =~ (pattern2Regex midP) ) <*> id)
+        restSlash = (takeWhile (=='/') . dropWhile (/='/')) restPath
+        lookupHandler :: E.IOException -> IO [String]
+        lookupHandler e = return []
+        baseLookup = case basePath of "" -> "./"
+                                      _  -> basePath
+        lookupDir = E.catch (getDirectoryContents baseLookup) lookupHandler
+        isMatch = filter ((==) <$> ( =~ (pattern2Regex midP) ) <*> id)
         contents = if midP == "" || head midP == '.' then lookupDir
                    else filter ((/='.') . head) <$> lookupDir
         contentsFiltered = fmap ( ((++ restSlash) . (basePath ++) <$>) . isMatch) contents

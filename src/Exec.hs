@@ -20,12 +20,13 @@ module Exec
  expandWord, expandNoSplit,
  execCmd,
  Shell,
- getVar
+ getVar,
+ putFunc
 ) where
 import ShCommon
 import WordExp
 import Lexer
-import TokParser (SmpCmd(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), WhileLoop(..), Redirect(..))
+import ShCommon (SmpCmd(..), FuncDef(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), WhileLoop(..), Redirect(..))
 import TokParser
 
 import Text.Parsec
@@ -60,11 +61,15 @@ import Foreign.C.Error
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
+                  env <- lift get
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord execCmd True <$> cmdWords cmd)
-                  if allFields /= [] then launchCmd (head allFields) (tail allFields) (prep ())
+                  if allFields /= [] then 
+                    case getF allFields env of Just cmd -> runCmd cmd
+                                               _ -> launchCmd (head allFields) (tail allFields) (prep ())
                   else prep ExitSuccess
                 else prep ExitSuccess
-  where execAssigns =   when (assign    cmd /= []) ( foldl1 (>>) (doAssign   <$> (assign cmd))    >> return () )
+  where getF l env = Map.lookup (head l) (func env)
+        execAssigns =   when (assign    cmd /= []) ( foldl1 (>>) (doAssign   <$> (assign cmd))    >> return () )
         execRedirects = when (redirects cmd /= []) ( foldl1 (>>) (doRedirect <$> (redirects cmd)) >> return () )
         prep arg = execAssigns >> execRedirects >> return arg
 
@@ -84,6 +89,7 @@ runWhileLoop (WhileLoop cond body) = runSepList cond >>= handler ExitSuccess
 runCmd :: Cmd -> Shell ExitCode
 runCmd cmdSym = case cmdSym of SCmd cmd        -> catchE (runSmpCmd cmd) handleCmdErr
                                CCmd cmd redirs -> runCCmd cmd redirs
+                               FCmd f          -> runFuncDef f
   where printDiag msg = (liftIO . putStrLn $ "kell: " ++ msg)
         handleCmdErr exit = do
           ia <- interactive <$> (lift get)
@@ -102,6 +108,9 @@ runCmpCmd :: CmpCmd -> Shell ExitCode
 runCmpCmd (IfCmp clause) = runIfClause  clause
 runCmpCmd (WhlCmp loop ) = runWhileLoop loop
 runCmpCmd (BrGroup list) = runSepList list
+
+runFuncDef :: FuncDef -> Shell ExitCode
+runFuncDef f = putFunc f >> return ExitSuccess
 
 runPipe :: Pipeline -> Shell ExitCode
 runPipe pipeline = if length pipeline == 1 then runCmd . head $ pipeline else do
@@ -142,20 +151,18 @@ getDefaultShellEnv :: Bool -> IO ShellEnv
 getDefaultShellEnv interactive = do
   envVars <- ( ((\(name,val) -> (name,(val,True)) ) <$> ) <$> getEnvironment)
   foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
-  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) interactive ownerModes
+  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) Map.empty interactive ownerModes
   where preDefined = [("PS1",  ("$ ",  False))
                      ,("PS2",  ("> ",  False))
                      ,("SHELL",("kell",True ))]
 
 exec :: TokParser a -> (a -> Shell ExitCode) -> String -> Shell ExitCode
-exec parser executor cmd = case toks of (Right val) -> do
-                                                         possibleAst <- parse2Ast val
-                                                         case possibleAst of (Right ast) -> executor ast
+exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
                                                                              (Left err)  -> (throwE . SyntaxErr) (show err)
                                         (Left err)  -> (throwE . SyntaxErr) (show err)
   where toks :: Either ParseError [Token]
         toks = parse lexer "subshell" cmd
-        parse2Ast tokens = runParserT parser () "tokenstreamsubshell" tokens
+        parse2Ast tokens = parse parser "tokenstreamsubshell" tokens
 
 execCmd :: String -> Shell ExitCode
 execCmd = exec parseSub runSepList

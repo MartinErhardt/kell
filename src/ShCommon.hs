@@ -16,9 +16,13 @@ module ShCommon(
   ShellEnv(..),
   Token(..),
   ShellError(..),
+  Cmd(..), FuncDef(..), CmpCmd(..), SmpCmd(..), Pipeline(..), AndOrList(..), SepList(..), IfClause(..), WhileLoop(..),
+  Redirect(Redirect),
   Shell,
   getVar,
   putVar,
+  getFunc,
+  putFunc,
   quote,
   escape,
   quoteEsc,
@@ -41,6 +45,26 @@ import System.Posix.Types(Fd(..),FileMode)
 import System.Posix.Files
 import System.Exit
 import System.Environment
+
+
+data Redirect = Redirect Token Fd String deriving (Eq,Show)
+data SmpCmd = SmpCmd { redirects ::  [Redirect]
+                     , assign :: [(String,String)]
+                     , cmdWords :: [String]
+                     } deriving(Eq, Show)
+data IfClause = IfClause { clauses :: [(SepList, SepList)]
+                         , else_part :: Maybe SepList
+                         } deriving(Eq,Show)
+data WhileLoop = WhileLoop SepList SepList deriving(Eq,Show)
+data FuncDef = FuncDef String Cmd deriving(Eq,Show)
+data Cmd      = SCmd SmpCmd | CCmd CmpCmd [Redirect] | FCmd FuncDef deriving(Eq, Show)
+--data Cmd    = Cmd SmpCmd | CmpCmd | (CmpCmd, [Redirect]) | FuncDef
+data CmpCmd   = BrGroup SepList | IfCmp IfClause | WhlCmp WhileLoop deriving(Eq,Show)
+--data CmpCmd = CmpCmd BraceGroup | SubShell | For_Clause | Case_Clause | If_Clause
+
+type Pipeline  = [Cmd]
+type AndOrList = [(Pipeline, Token)] -- Last Token has no meaning
+type SepList   = [(AndOrList,Token)]
 
 data Token = Word String
   -- operators as in https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#:~:text=command%20is%20parsed.-,2.10.2,-Shell%20Grammar%20Rules
@@ -116,7 +140,7 @@ parseXBDName :: Parser String
 parseXBDName = (++) . (:[]) <$> (letter <|> char '_') <*> many (alphaNum <|> char '_')
 
 data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
-                      -- , func :: Map.Map String String
+                         , func :: Map.Map String Cmd
                          , interactive :: Bool
                          , shFMode :: FileMode
                          } deriving(Eq, Show)
@@ -145,18 +169,23 @@ getErrExitCode e = case e of SyntaxErr _         -> ExitFailure 117
                              CmdNotFoundErr _ ec -> ec
 
 type Shell = ExceptT ShellError (StateT ShellEnv IO)
-
+-- TODO factor out common parts
 getVar :: String -> Shell (Maybe String)
 getVar name = lift get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
+putFunc :: FuncDef -> Shell ()
+putFunc (FuncDef name cmd) = lift get >>= lift . put . changeNamespace ( Map.insert name cmd . func )
+  where changeNamespace modifier curEnv = curEnv {func = modifier curEnv }
+
+getFunc :: String -> Shell (Maybe Cmd)
+getFunc name = lift get >>= return . (Map.lookup name) . func
 
 --raiseExpErr :: a -> String -> Shell a
 --raiseExpErr val msg = do
 --  ev <- get
 --  if interacive ev then return (ExpErr msg) else return val
 -- infixl 4 <*>>; (<*>>) :: Monad m => m (a -> m b) -> (m a -> m b); mamb <*>> ma = join (mamb <*> ma)
-
 putVar :: String -> String -> Shell ()
 putVar name newval = do
   oldentry <- lift get >>= return . (Map.lookup name) . var
