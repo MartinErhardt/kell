@@ -36,6 +36,7 @@ import Data.Stack
 import Data.Map as Map
 import Text.Parsec
 import Text.Parsec.String (Parser)
+import qualified Text.Read as Rd
 
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Lazy
@@ -140,10 +141,12 @@ parseXBDName :: Parser String
 parseXBDName = (++) . (:[]) <$> (letter <|> char '_') <*> many (alphaNum <|> char '_')
 
 data ShellEnv = ShellEnv { var :: Map.Map String (String,Bool)
+                         , posArgs :: Stack [String]
                          , func :: Map.Map String Cmd
                          , interactive :: Bool
                          , shFMode :: FileMode
-                         } deriving(Eq, Show)
+                         } deriving(Show)
+
 data ShellError = SyntaxErr      String
                 | SBIErr
                 | UtilErr        ExitCode
@@ -171,9 +174,15 @@ getErrExitCode e = case e of SyntaxErr _         -> ExitFailure 117
 type Shell = ExceptT ShellError (StateT ShellEnv IO)
 -- TODO factor out common parts
 getVar :: String -> Shell (Maybe String)
-getVar name = lift get >>= return . getVal . (Map.lookup name) . var
+getVar name = do 
+  env <- lift get
+  case Rd.readMaybe name :: Maybe Int of Just n -> return $ getPos env n --TODO exclude negative n
+                                         _ -> lift get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
+        getPos env n = case stackPeek (posArgs env) of Just args -> if length args < n then Nothing
+	                                                            else Just $ args !! (n-1)
+                                                       _ -> Nothing
 putFunc :: FuncDef -> Shell ()
 putFunc (FuncDef name cmd) = lift get >>= lift . put . changeNamespace ( Map.insert name cmd . func )
   where changeNamespace modifier curEnv = curEnv {func = modifier curEnv }

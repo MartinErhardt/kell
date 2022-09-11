@@ -59,7 +59,8 @@ expandParams launcher toExp = do
   handleParseOutput $ parse parseParamExp "parameter expansion" toExp
   where parseSplit = foldl1 (<|>) ( try . string . fst <$> actionT)
         parseParamExp :: Parser (String, String, String)
-        parseParamExp =  try ((, , ) <$> parseXBDName <*> parseSplit <*> many anyChar) <|> ((,"-","") <$> parseXBDName <* eof)
+        parseParamExp =  try ((, , ) <$> (parseXBDName <|> many1 digit) <*> parseSplit <*> many anyChar) 
+	            <|> ((,"-","") <$>   (parseXBDName <|> many1 digit) <* eof)
         assignW p w = putVar p w >> return w
         first (x ,_, _) = x
         sec   (_, x, _) = x
@@ -145,7 +146,7 @@ parseExps doFExps names = (eof >> return [])
         -- the expansion shall use the longest valid name (see XBD Name)
         namesSorted = L.sortBy (\a b -> compare (length b) (length a)) names
         getVExp :: [String] -> Parser String
-        getVExp names = foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> namesSorted )
+        getVExp names = many1 digit <|> foldl1 (<|>) ((\a -> try $ string a >> return a ) <$> namesSorted )
         getExp begin end = try( string begin) >> (quote $ getDollarExp (const "") (stackPush stackNew end) )
         processDQuote = enc (ExpTok NoExp False "\"") . (\(Right v) -> v) . parse (parseExps False names) "qE"
 

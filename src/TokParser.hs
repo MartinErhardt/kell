@@ -148,10 +148,9 @@ parsePipe :: TokParser Pipeline
 parsePipe = (fst <$>) <$> parseList (return . (,EOF)) True [PIPE]          parseCmd
 
 parseCmd :: TokParser Cmd
-parseCmd = try( CCmd <$> parseCmpCmd <*> many parseIORed )
-        <|> try ( FCmd <$> parseFuncDef )
-        <|> try (parseSmpCmd >>= return . SCmd)
-        <|> FCmd <$> parseFuncDef
+parseCmd =  try (parseSmpCmd >>= return . SCmd)
+        <|> try (CCmd <$> parseCmpCmd <*> many parseIORed )
+        <|> try (FCmd <$> parseFuncDef )
 
 parseCmpCmd :: TokParser CmpCmd
 parseCmpCmd = (parseIfClause "if" >>= return . IfCmp )

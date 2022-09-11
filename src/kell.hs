@@ -59,7 +59,7 @@ main :: IO ()
 main = do
   args  <- getArgs
   pArgs <- handlePArgs $ parse parseArgs "args" args
-  shEnv <- getDefaultShellEnv $ ('i' `elem` opts pArgs) || (script pArgs == None)
+  shEnv <- getDefaultShellEnv args $ ('i' `elem` opts pArgs) || (script pArgs == None)
   res <- evalStateT (runExceptT $ execInterpreter pArgs) shEnv >>= exitHandler
   print res
   exitImmediately res

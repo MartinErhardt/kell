@@ -67,7 +67,8 @@ expandPathR restPath basePath = do
         contentsFiltered = fmap ( ((++ restSlash) . (basePath ++) <$>) . isMatch) contents
 
 expandPath :: String -> IO [String]
-expandPath str = expandPathR relPath (takeWhile (=='/') str) >>= handleRes
+expandPath str = case str of "" -> return [""]
+                             _  -> expandPathR relPath (takeWhile (=='/') str) >>= handleRes
   where relPath = dropWhile (=='/') str
         handleRes paths = case paths of [] -> return [str]
                                         _  -> return paths

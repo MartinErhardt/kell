@@ -64,7 +64,7 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
                   env <- lift get
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord execCmd True <$> cmdWords cmd)
                   if allFields /= [] then 
-                    case getF allFields env of Just cmd -> runCmd cmd
+                    case getF allFields env of Just cmd -> pushArgs (tail allFields) *> runCmd cmd <* popArgs
                                                _ -> launchCmd (head allFields) (tail allFields) (prep ())
                   else prep ExitSuccess
                 else prep ExitSuccess
@@ -72,6 +72,11 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         execAssigns =   when (assign    cmd /= []) ( foldl1 (>>) (doAssign   <$> (assign cmd))    >> return () )
         execRedirects = when (redirects cmd /= []) ( foldl1 (>>) (doRedirect <$> (redirects cmd)) >> return () )
         prep arg = execAssigns >> execRedirects >> return arg
+        changePosArgs modifier curEnv  = lift . put $ curEnv {posArgs = modifier curEnv}
+        pushArgs args = lift get >>= changePosArgs (((flip stackPush) args)  . posArgs)
+        stackPopIfNotEmpty s = case stackPop s of Just st  -> fst st
+                                                  Nothing -> s
+        popArgs = lift get >>= changePosArgs (stackPopIfNotEmpty . posArgs)
 
 runIfClause :: IfClause -> Shell ExitCode
 runIfClause cl = do
@@ -147,11 +152,12 @@ runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> re
   where runAsync andOrL = lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ runAndOr andOrL)
         continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
-getDefaultShellEnv :: Bool -> IO ShellEnv
-getDefaultShellEnv interactive = do
+getDefaultShellEnv :: [String] -> Bool -> IO ShellEnv
+getDefaultShellEnv args interactive = do
   envVars <- ( ((\(name,val) -> (name,(val,True)) ) <$> ) <$> getEnvironment)
   foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
-  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) Map.empty interactive ownerModes
+  -- liftIO $ print args
+  return $ ShellEnv (Map.fromList $ envVars ++ preDefined) (stackPush stackNew args) Map.empty interactive ownerModes
   where preDefined = [("PS1",  ("$ ",  False))
                      ,("PS2",  ("> ",  False))
                      ,("SHELL",("kell",True ))]
