@@ -59,13 +59,18 @@ import System.Posix.Files
 import System.Exit
 import Foreign.C.Error
 
+fetchCompletion :: String -> [String] -> Shell ExitCode
+fetchCompletion _ args = do
+  liftIO $ putStrLn "builtin!"
+  return ExitSuccess
+
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
                   env <- lift get
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord execCmd True <$> cmdWords cmd)
                   if allFields /= [] then 
                     case getF allFields env of Just cmd -> pushArgs (tail allFields) *> runCmd cmd <* popArgs
-                                               _ -> launchCmd (head allFields) (tail allFields) (prep ())
+                                               _ -> getCmd allFields
                   else prep ExitSuccess
                 else prep ExitSuccess
   where getF l env = Map.lookup (head l) (func env)
@@ -77,6 +82,10 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         stackPopIfNotEmpty s = case stackPop s of Just st  -> fst st
                                                   Nothing -> s
         popArgs = lift get >>= changePosArgs (stackPopIfNotEmpty . posArgs)
+        builtinCmd :: Map.Map String (String -> [String] -> Shell ExitCode)
+        builtinCmd = Map.fromList [("gpt3", fetchCompletion)]
+        getCmd fs = case Map.lookup (head fs) builtinCmd of Just builtin -> builtin (head fs) (tail fs)
+                                                            Nothing -> launchCmd (head fs) (tail fs) (prep ())
 
 runIfClause :: IfClause -> Shell ExitCode
 runIfClause cl = do
