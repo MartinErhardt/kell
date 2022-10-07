@@ -155,9 +155,9 @@ runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> re
 -- |The 'getDefaultShellEnv' function generates a initial shell environment at program launch. 
 -- This includes the import of environment variables and program arguments as well as the definition of prompt variables.
 -- TODO inbuilt functions
-getDefaultShellEnv :: [String] -> -- ^ script arguments soon to be positional parameters
-Bool -> -- ^ interactive mode
-IO ShellEnv -- ^ Resulting shell environment containing all environment variables and functions.
+getDefaultShellEnv :: [String] -- ^ script arguments soon to be positional parameters
+ -> Bool -- ^ interactive mode
+ -> IO ShellEnv -- ^ Resulting shell environment containing all environment variables and functions.
 getDefaultShellEnv args interactive = do
   envVars <- ( ((\(name,val) -> (name,(val,True)) ) <$> ) <$> getEnvironment)
   foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
@@ -185,8 +185,8 @@ execCmd = exec parseSub runSepList
 
 -- |The 'waitToExitCode' function waits until the process given by pId terminates with a exit code.
 -- This is necessary because getProcessStatus and on a lower lever waitpid(2) also return on signal calls.
-waitToExitCode :: ProcessID -> -- ^ process to wait for 
-Shell ExitCode -- ^ final exit code
+waitToExitCode :: ProcessID-- ^ process to wait for 
+ -> Shell ExitCode -- ^ final exit code
 waitToExitCode pid = do
   state <- liftIO $ getProcessStatus True False pid
   case state of (Just (Exited exitCode) ) -> return exitCode
