@@ -152,7 +152,12 @@ runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> re
   where runAsync andOrL = lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ runAndOr andOrL)
         continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
-getDefaultShellEnv :: [String] -> Bool -> IO ShellEnv
+-- |The 'getDefaultShellEnv' function generates a initial shell environment at program launch. 
+-- This includes the import of environment variables and program arguments as well as the definition of prompt variables.
+-- TODO inbuilt functions
+getDefaultShellEnv :: [String] -> -- ^ script arguments soon to be positional parameters
+Bool -> -- ^ interactive mode
+IO ShellEnv -- ^ Resulting shell environment containing all environment variables and functions.
 getDefaultShellEnv args interactive = do
   envVars <- ( ((\(name,val) -> (name,(val,True)) ) <$> ) <$> getEnvironment)
   foldl (flip $ (>>) . (\(name, (val,exp)) -> if exp then setEnv name val else return ())) (return ()) preDefined
@@ -162,7 +167,12 @@ getDefaultShellEnv args interactive = do
                      ,("PS2",  ("> ",  False))
                      ,("SHELL",("kell",True ))]
 
-exec :: TokParser a -> (a -> Shell ExitCode) -> String -> Shell ExitCode
+-- |The 'exec' function parses a string cmd with a parser into an ast node of type a.
+-- It then executes said ast with the function 'executor', which generates a shell action based on this ast.
+exec :: TokParser a -- ^ parser
+  -> (a -> Shell ExitCode) -- ^ function generating a shell action based on ast
+  -> String -- ^ command to parse and execute
+  -> Shell ExitCode -- ^ resulting shell action that can be executed with 
 exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
                                                                              (Left err)  -> (throwE . SyntaxErr) (show err)
                                         (Left err)  -> (throwE . SyntaxErr) (show err)
@@ -173,13 +183,21 @@ exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Ri
 execCmd :: String -> Shell ExitCode
 execCmd = exec parseSub runSepList
 
-waitToExitCode :: ProcessID -> Shell ExitCode
+-- |The 'waitToExitCode' function waits until the process given by pId terminates with a exit code.
+-- This is necessary because getProcessStatus and on a lower lever waitpid(2) also return on signal calls.
+waitToExitCode :: ProcessID -> -- ^ process to wait for 
+Shell ExitCode -- ^ final exit code
 waitToExitCode pid = do
   state <- liftIO $ getProcessStatus True False pid
   case state of (Just (Exited exitCode) ) -> return exitCode
                 _                         -> waitToExitCode pid
 
-launchCmd :: FilePath -> [String] -> Shell () -> Shell ExitCode
+-- |This function creates a shell action, executing the program given at the path 'cmd' with the arguments 'args'.
+-- Before executing the program and after the fork it executes the shell action 'prepare'.
+launchCmd :: FilePath -- ^ location of program to launch
+  -> [String] -- ^ arguments
+  -> Shell () -- ^ shell action to be executed right before program
+  -> Shell ExitCode -- ^ exit code of launched program
 launchCmd cmd args prepare = do 
   forkedPId <- lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ prepare >> liftIO runInCurEnv)
   e <- waitToExitCode forkedPId
@@ -193,10 +211,15 @@ launchCmd cmd args prepare = do
         runUnchecked = getEnvironment >>= (executeFile cmd True args) . Just 
         runInCurEnv = (Control.Exception.try $ runUnchecked) >>= execHandler
 
-doAssign :: (String,String) -> Shell ()
+-- |The 'doAssign' function expands a word and assigns it to a variable
+doAssign :: (String,String) -- ^ tuple containing the name of the program in the first component and the word to assign in its second one 
+  -> Shell () -- ^ executable shell action
 doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 
-doRedirect :: Redirect -> Shell (IO Fd)
+-- |The 'doRedirect' performs the redirectionS in a given Redirect.
+-- It then returns an IO action wrapped in the Shell monad, that reverts said redirection.
+doRedirect :: Redirect -- ^redirectionS to perform
+  -> Shell (IO Fd) -- ^IO action, that reverts the given redirectionS
 doRedirect (Redirect tok fd path) = do liftIO $ print fd
                                        expandedPath <- expandNoSplit execCmd path
                                        lift get >>= (getAction tok fd expandedPath) . shFMode
@@ -224,4 +247,3 @@ doRedirect (Redirect tok fd path) = do liftIO $ print fd
                       ,(LESSAND,   (\fd1 fd2 m -> redirFds fd1 (fromIntegral $ Rd.read fd2) [ReadMode, ReadWriteMode] ))
                       ,(GREATAND,  (\fd1 fd2 m -> redirFds fd1 (fromIntegral $ Rd.read fd2) [WriteMode, AppendMode, ReadWriteMode] ))]
         getAction tok = (\(Just v) -> v) $ Map.lookup tok (Map.fromList redirAction) -- Pattern matching failure for Here-Documenents
-
