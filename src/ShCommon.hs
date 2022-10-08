@@ -174,14 +174,14 @@ getErrExitCode e = case e of SyntaxErr _         -> ExitFailure 117
 type Shell = ExceptT ShellError (StateT ShellEnv IO)
 -- TODO factor out common parts
 getVar :: String -> Shell (Maybe String)
-getVar name = do 
+getVar name = do
   env <- lift get
   case Rd.readMaybe name :: Maybe Int of Just n -> return $ getPos env n --TODO exclude negative n
                                          _ -> lift get >>= return . getVal . (Map.lookup name) . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
         getPos env n = case stackPeek (posArgs env) of Just args -> if length args < n then Nothing
-	                                                            else Just $ args !! (n-1)
+                                                              else Just $ args !! (n-1)
                                                        _ -> Nothing
 putFunc :: FuncDef -> Shell ()
 putFunc (FuncDef name cmd) = lift get >>= lift . put . changeNamespace ( Map.insert name cmd . func )
