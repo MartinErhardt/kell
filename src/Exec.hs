@@ -35,6 +35,7 @@ import qualified Data.Map as Map
 import Data.Stack
 import qualified Data.List as L
 import qualified Text.Read as Rd
+import qualified Control.Exception as Ex
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import System.Posix.Process
@@ -63,8 +64,11 @@ import OpenAI
 offerCompletion :: String -> [String] -> Shell ExitCode
 offerCompletion _ (arg1:rest) = do
   completedCmd <- (liftIO . fetchCompletion) arg1
-  liftIO $ putStrLn completedCmd
-  execCmd completedCmd
+  (liftIO . putStr) $ "Is " ++ completedCmd ++ " what you asked for? (y/n): "
+  liftIO $ hFlush stdout
+  desired <- liftIO ( Ex.try $ hGetLine stdin :: IO (Either IOException String) )
+  case desired of Right "y" -> execCmd completedCmd
+                  _         -> return ExitSuccess
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
