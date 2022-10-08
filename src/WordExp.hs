@@ -59,8 +59,8 @@ expandParams launcher toExp = do
   handleParseOutput $ parse parseParamExp "parameter expansion" toExp
   where parseSplit = foldl1 (<|>) ( try . string . fst <$> actionT)
         parseParamExp :: Parser (String, String, String)
-        parseParamExp =  try ((, , ) <$> (parseXBDName <|> many1 digit) <*> parseSplit <*> many anyChar) 
-	            <|> ((,"-","") <$>   (parseXBDName <|> many1 digit) <* eof)
+        parseParamExp =  try ((, , ) <$> (parseXBDName <|> many1 digit) <*> parseSplit <*> many anyChar)
+              <|> ((,"-","") <$>   (parseXBDName <|> many1 digit) <* eof)
         assignW p w = putVar p w >> return w
         first (x ,_, _) = x
         sec   (_, x, _) = x
