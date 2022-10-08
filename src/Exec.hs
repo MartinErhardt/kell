@@ -58,11 +58,13 @@ import Data.Int(Int32(..))
 import System.Posix.Files
 import System.Exit
 import Foreign.C.Error
+import OpenAI
 
-fetchCompletion :: String -> [String] -> Shell ExitCode
-fetchCompletion _ args = do
-  liftIO $ putStrLn "builtin!"
-  return ExitSuccess
+offerCompletion :: String -> [String] -> Shell ExitCode
+offerCompletion _ (arg1:rest) = do
+  completedCmd <- (liftIO . fetchCompletion) arg1
+  liftIO $ putStrLn completedCmd
+  execCmd completedCmd
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
@@ -82,10 +84,9 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         stackPopIfNotEmpty s = case stackPop s of Just st  -> fst st
                                                   Nothing -> s
         popArgs = lift get >>= changePosArgs (stackPopIfNotEmpty . posArgs)
-        builtinCmd :: Map.Map String (String -> [String] -> Shell ExitCode)
-        builtinCmd = Map.fromList [("gpt3", fetchCompletion)]
-        getCmd fs = case Map.lookup (head fs) builtinCmd of Just builtin -> builtin (head fs) (tail fs)
-                                                            Nothing -> launchCmd (head fs) (tail fs) (prep ())
+        builtinCmd = Map.fromList [("gpt3", offerCompletion)]
+        getCmd (cmd:args) = case Map.lookup cmd builtinCmd of Just builtin -> builtin cmd args
+                                                              Nothing -> launchCmd args (prep ()) cmd
 
 runIfClause :: IfClause -> Shell ExitCode
 runIfClause cl = do
@@ -203,11 +204,11 @@ waitToExitCode pid = do
 
 -- |This function creates a shell action, executing the program given at the path 'cmd' with the arguments 'args'.
 -- Before executing the program and after the fork it executes the shell action 'prepare'.
-launchCmd :: FilePath -- ^ location of program to launch
-  -> [String] -- ^ arguments
+launchCmd :: [String] -- ^ arguments
   -> Shell () -- ^ shell action to be executed right before program
+  -> FilePath -- ^ location of program to launch
   -> Shell ExitCode -- ^ exit code of launched program
-launchCmd cmd args prepare = do 
+launchCmd args prepare cmd = do
   forkedPId <- lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ prepare >> liftIO runInCurEnv)
   e <- waitToExitCode forkedPId
   case e of ExitFailure 126 -> throwE $ CmdNotFoundErr (cmd ++ ": (Permission denied)")         e
