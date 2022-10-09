@@ -58,6 +58,7 @@ import System.Posix.Types(ProcessID, Fd(..),FileMode)
 import Data.Int(Int32(..))
 import System.Posix.Files
 import System.Exit
+import System.Directory
 import Foreign.C.Error
 import OpenAI
 
@@ -69,6 +70,13 @@ offerCompletion _ (arg1:rest) = do
   desired <- liftIO ( Ex.try $ hGetLine stdin :: IO (Either IOException String) )
   case desired of Right "y" -> execProgram completedCmd
                   _         -> return ExitSuccess
+
+changeDirectory :: String -> [String] -> Shell ExitCode
+changeDirectory _ [] = do
+  homeDir <- liftIO $ getHomeDirectory
+  liftIO $ setCurrentDirectory homeDir
+  return ExitSuccess
+changeDirectory _ (arg1:rest) = liftIO $ setCurrentDirectory arg1 >> return ExitSuccess
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
@@ -88,7 +96,8 @@ runSmpCmd cmd = if cmdWords cmd /= [] then do
         stackPopIfNotEmpty s = case stackPop s of Just st  -> fst st
                                                   Nothing -> s
         popArgs = lift get >>= changePosArgs (stackPopIfNotEmpty . posArgs)
-        builtinCmd = Map.fromList [("gpt3", offerCompletion)]
+        builtinCmd = Map.fromList [("gpt3", offerCompletion)
+                                  ,("cd", changeDirectory)]
         getCmd (cmd:args) = case Map.lookup cmd builtinCmd of Just builtin -> builtin cmd args
                                                               Nothing -> launchCmd args (prep ()) cmd
 
