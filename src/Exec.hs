@@ -67,7 +67,7 @@ offerCompletion _ (arg1:rest) = do
   (liftIO . putStr) $ "Is " ++ completedCmd ++ " what you asked for? (y/n): "
   liftIO $ hFlush stdout
   desired <- liftIO ( Ex.try $ hGetLine stdin :: IO (Either IOException String) )
-  case desired of Right "y" -> execCmd completedCmd
+  case desired of Right "y" -> execProgram completedCmd
                   _         -> return ExitSuccess
 
 runSmpCmd :: SmpCmd -> Shell ExitCode
@@ -166,6 +166,9 @@ runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> re
   where runAsync andOrL = lift get >>= liftIO . forkProcess . (>> return ()) . evalStateT (runExceptT $ runAndOr andOrL)
         continueWith l ec = if tail l /= [] then (runSepList $ tail l) else return ec
 
+--runProgram :: [SepList] -> Shell ExitCode
+--runProgram sepLists = ((fmap last) . sequence) $ runSepList <$> sepLists -- TODO: Error handling?
+
 -- |The 'getDefaultShellEnv' function generates a initial shell environment at program launch. 
 -- This includes the import of environment variables and program arguments as well as the definition of prompt variables.
 -- TODO inbuilt functions
@@ -193,6 +196,9 @@ exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Ri
   where toks :: Either ParseError [Token]
         toks = parse lexer "subshell" cmd
         parse2Ast tokens = parse parser "tokenstreamsubshell" tokens
+
+execProgram :: String -> Shell ExitCode
+execProgram = exec parseToks runSepList
 
 execCmd :: String -> Shell ExitCode
 execCmd = exec parseSub runSepList

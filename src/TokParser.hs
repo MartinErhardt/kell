@@ -187,8 +187,11 @@ parseWhileLoop = WhileLoop <$> (resWord "while" *> parseCmpList) <*> doGroup
 doGroup :: TokParser SepList
 doGroup = resWord "do" *> parseCmpList <* resWord "done"
 
+--parseProgram :: TokParser [SepList]
+--parseProgram = many parseToks
+
 parseToks :: TokParser SepList
-parseToks = (newLnList *> eofP *> return []) <|> (parseSepList False [SEMI,Ampersand] <* newLnList <* eofP)
+parseToks = (try (newLnList *> eofP *> return [])) <|> (newLnList *> ( (++) <$> parseSepList False [SEMI,Ampersand] <*> parseToks))
   where eofP = eof <|> op EOF
 
 parseSub :: TokParser SepList
