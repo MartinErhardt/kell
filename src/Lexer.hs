@@ -15,11 +15,14 @@ module Lexer
 ( lexer,
   Token(..),
 ) where
+
+import ShCommon
+
+import Data.Stack
 import Text.Parsec
 -- TODO No proper wchar support
 import Text.Parsec.String (Parser)
-import Data.Stack 
-import ShCommon
+
 reservedOps = [("&&",    AND_IF)
               ,("||",    OR_IF)
               ,(";;",    DSEMI)
@@ -41,7 +44,7 @@ reservedOps = [("&&",    AND_IF)
 
 
 parseReservedOp :: Parser Token
-parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> ( return b) ) <$> reservedOps) 
+parseReservedOp = foldl1 (<|>) ((\(a,b)-> try $ string a >> return b ) <$> reservedOps)
 
 parseWord :: Parser String
 parseWord = (eof       >>            return "" )
@@ -50,13 +53,13 @@ parseWord = (eof       >>            return "" )
         <|> (char '`'  >> ((++) . ("`"++)  <$> quote  (char '`'  >> return "`" ) <*> (parseWord <|> return "") ) )
         <|> (char '"'  >> ((++) . ("\""++) <$> dQuote (char '"'  >> return "\"") <*> (parseWord <|> return "") ) )
         <|> (char '$'  >> ((++) . ("$"++)  <$> getDollarStr                      <*> (parseWord <|> return "") ) )-- word expansion
-        <|> (             ((++) . (:[]))   <$> noneOf forbidden                  <*> (parseWord <|> return "") )-- parse letter
-  where forbidden = ((head . fst) <$> reservedOps) ++ " "
+        <|> (             (++) . (:[])     <$> noneOf forbidden                  <*> (parseWord <|> return "") )-- parse letter
+  where forbidden = (head . fst <$> reservedOps) ++ " "
         getDollarStr = getDollarExp id stackNew <|> return ""
 
 lexer :: Parser [Token]
 lexer = (eof      >> return [EOF])
-    <|> ( ( (++) . (:[]) )       <$> parseReservedOp <*>                         lexer)
+    <|> ( (++) . (:[])         <$> parseReservedOp <*>                         lexer)
     <|> (char '#' >> many (noneOf "\n")                                       >> lexer)
     <|> (char ' '                                                             >> lexer)
-    <|> ( ( (++) . (:[]) . Word) <$> parseWord       <*> ((eof >> return [EOF]) <|> lexer) )
+    <|> ( (++) . (:[]) . Word  <$> parseWord       <*> ((eof >> return [EOF]) <|> lexer) )

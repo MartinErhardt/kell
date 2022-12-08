@@ -32,20 +32,22 @@ module ShCommon(
   parseXBDName
 )
 where
-import Data.Stack
+
+import Data.Functor ((<&>))
 import Data.Map as Map
+import Data.Stack
 import Text.Parsec
-import Text.Parsec.String (Parser)
 import qualified Text.Read as Rd
+import Text.Parsec.String (Parser)
 
 import Control.Monad.IO.Class
-import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
-import System.Posix.Types(Fd(..),FileMode)
+import Control.Monad.Trans.State.Lazy
 import System.Posix.Files
-import System.Exit
+import System.Posix.Types(Fd(..),FileMode)
 import System.Environment
+import System.Exit
 
 
 data Redirect = Redirect Token Fd String deriving (Eq,Show)
@@ -113,19 +115,19 @@ escape :: Char -> Parser String
 escape identifier = char identifier >> ([identifier]++) .(:[]) <$> anyChar
 
 quoteEsc :: Parser (String -> String) -> Parser String -> Parser String
-quoteEsc recCondition endCondition = endCondition <|> (eof >> unexpected("eof") )
-                                <|> (recCondition              <*> (quoteEsc recCondition endCondition) )
-                                <|> ( (++) . (:[]) <$> anyChar <*> (quoteEsc recCondition endCondition) )
+quoteEsc recCondition endCondition = endCondition <|> (eof >> unexpected "eof")
+                                <|> (recCondition              <*> quoteEsc recCondition endCondition )
+                                <|> ( (++) . (:[]) <$> anyChar <*> quoteEsc recCondition endCondition )
 
 quote :: Parser String -> Parser String
 quote = quoteEsc $ (++) <$> escape '\\' -- TODO catch and specify parse error with <?>
 
 dQuote :: Parser String -> Parser String
-dQuote = quoteEsc $ (++) <$> (escape '\\' <|> (getDollarExp id stackNew ) )
+dQuote = quoteEsc $ (++) <$> (escape '\\' <|> getDollarExp id stackNew )
 
 getDollarExp :: (String -> String) -> Stack String -> Parser String
-getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern matching will fail if string is empty
-  where closingAction s c = if stackIsEmpty s || ( (stackPeek s) /= (Just c)) then Nothing
+getDollarExp f s = foldl1 (<|>) (stackHandler <$> stackAction s) -- Pattern matching will fail if string is empty
+  where closingAction s c = if stackIsEmpty s || ( stackPeek s /= Just c) then Nothing
                             else (\(Just s)-> Just $ fst s) $ stackPop s
         stackAction s = [("((", Just $ stackPush s "))")
                         ,("(",  Just $ stackPush s ")")
@@ -133,8 +135,8 @@ getDollarExp f s = (foldl1 (<|>) (stackHandler <$> stackAction s)) -- Pattern ma
                         ,("))",  closingAction s "))")
                         ,(")",   closingAction s ")")
                         ,("}",   closingAction s "}")]
-        stackHandler (str, (Just a)) = (try $ string str) >> if stackIsEmpty a then return $ f str
-                                                             else quote (getDollarExp f a) >>= return . (str++)
+        stackHandler (str, Just a) = try (string str) >> if stackIsEmpty a then return $ f str
+                                                             else quote (getDollarExp f a) <&> (str ++)
         stackHandler (str, Nothing) = fail $ "no" ++ str
 
 parseXBDName :: Parser String
@@ -177,7 +179,7 @@ getVar :: String -> Shell (Maybe String)
 getVar name = do
   env <- lift get
   case Rd.readMaybe name :: Maybe Int of Just n -> return $ getPos env n --TODO exclude negative n
-                                         _ -> lift get >>= return . getVal . (Map.lookup name) . var
+                                         _ -> lift get <&> getVal . Map.lookup name . var
   where getVal entry = case entry of (Just (val, _)) -> Just val
                                      _               -> Nothing
         getPos env n = case stackPeek (posArgs env) of Just args -> if length args < n then Nothing
@@ -188,7 +190,7 @@ putFunc (FuncDef name cmd) = lift get >>= lift . put . changeNamespace ( Map.ins
   where changeNamespace modifier curEnv = curEnv {func = modifier curEnv }
 
 getFunc :: String -> Shell (Maybe Cmd)
-getFunc name = lift get >>= return . (Map.lookup name) . func
+getFunc name = lift get <&> Map.lookup name . func
 
 --raiseExpErr :: a -> String -> Shell a
 --raiseExpErr val msg = do
@@ -197,11 +199,10 @@ getFunc name = lift get >>= return . (Map.lookup name) . func
 -- infixl 4 <*>>; (<*>>) :: Monad m => m (a -> m b) -> (m a -> m b); mamb <*>> ma = join (mamb <*> ma)
 putVar :: String -> String -> Shell ()
 putVar name newval = do
-  oldentry <- lift get >>= return . (Map.lookup name) . var
+  oldentry <- lift get <&> Map.lookup name . var
   case oldentry of (Just (_,True)) -> liftIO $ setEnv name newval
                    _               -> return ()
-  lift get >>= lift . put . changeNamespace ( (Map.insert name (newEntry newval oldentry)) . var)
+  lift get >>= lift . put . changeNamespace ( Map.insert name (newEntry newval oldentry) . var)
   where changeNamespace modifier curEnv = curEnv {var = modifier curEnv }
         newEntry newval oldentry = case oldentry of (Just (_,True)) -> (newval, True)
                                                     _               -> (newval, False)
-
