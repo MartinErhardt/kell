@@ -32,6 +32,7 @@ executable kell
                        bytestring,
                        containers,
                        directory,
+                       http-client >= 0.7.6,
                        http-conduit >= 2.3.8,
                        parsec,
                        regex-tdfa,
