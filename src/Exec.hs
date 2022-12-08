@@ -23,10 +23,9 @@ module Exec
  getVar,
  putFunc
 ) where
-import ShCommon
 import WordExp
 import Lexer
-import ShCommon (SmpCmd(..), FuncDef(..), Pipeline, AndOrList, SepList, Cmd(..), CmpCmd(..), IfClause(..), WhileLoop(..), Redirect(..))
+import ShCommon
 import TokParser
 
 import Text.Parsec
@@ -44,12 +43,10 @@ import System.Posix.IO(OpenFileFlags(..))
 import System.IO
 import System.Exit
 import Control.Monad
-import GHC.IO.Exception(IOException(..))
-import GHC.IO.Exception(IOErrorType(..))
+import GHC.IO.Exception(IOException(..), IOErrorType(..))
 import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Except
-import Control.Monad.Trans.Class
 import System.Posix.Signals
 import System.Environment
 import Data.Bits
@@ -82,7 +79,7 @@ runSmpCmd :: SmpCmd -> Shell ExitCode
 runSmpCmd cmd = if cmdWords cmd /= [] then do
                   env <- lift get
                   allFields <- foldl1 (\a b -> (++) <$> a <*> b)  (expandWord execCmd True <$> cmdWords cmd)
-                  if allFields /= [] then 
+                  if allFields /= [] then
                     case getF allFields env of Just cmd -> pushArgs (tail allFields) *> runCmd cmd <* popArgs
                                                _ -> getCmd allFields
                   else prep ExitSuccess
@@ -161,7 +158,7 @@ runAndOr :: AndOrList -> Shell ExitCode
 runAndOr [(pipe,Lexer.EOF)] = runPipe pipe
 runAndOr andOrL = case head andOrL of (p,AND_IF) -> runPipe p >>= dropIf (/=ExitSuccess)
                                       (p,OR_IF)  -> runPipe p >>= dropIf (==ExitSuccess)
-    where dropIf cond ec = if cond ec then 
+    where dropIf cond ec = if cond ec then
                                  if rest andOrL /= []  then runAndOr $ rest andOrL
                                  else return ec
                                else runAndOr $ tail andOrL
@@ -178,7 +175,7 @@ runSepList sepL = case head sepL of (andOrL, Ampersand) -> runAsync andOrL >> re
 --runProgram :: [SepList] -> Shell ExitCode
 --runProgram sepLists = ((fmap last) . sequence) $ runSepList <$> sepLists -- TODO: Error handling?
 
--- |The 'getDefaultShellEnv' function generates a initial shell environment at program launch. 
+-- |The 'getDefaultShellEnv' function generates a initial shell environment at program launch.
 -- This includes the import of environment variables and program arguments as well as the definition of prompt variables.
 -- TODO inbuilt functions
 getDefaultShellEnv :: [String] -- ^ script arguments soon to be positional parameters
@@ -198,7 +195,7 @@ getDefaultShellEnv args interactive = do
 exec :: TokParser a -- ^ parser
   -> (a -> Shell ExitCode) -- ^ function generating a shell action based on ast
   -> String -- ^ command to parse and execute
-  -> Shell ExitCode -- ^ resulting shell action that can be executed with 
+  -> Shell ExitCode -- ^ resulting shell action that can be executed with
 exec parser executor cmd = case toks of (Right val) -> case parse2Ast val of (Right ast) -> executor ast
                                                                              (Left err)  -> (throwE . SyntaxErr) (show err)
                                         (Left err)  -> (throwE . SyntaxErr) (show err)
@@ -214,7 +211,7 @@ execCmd = exec parseSub runSepList
 
 -- |The 'waitToExitCode' function waits until the process given by pId terminates with a exit code.
 -- This is necessary because getProcessStatus and on a lower lever waitpid(2) also return on signal calls.
-waitToExitCode :: ProcessID-- ^ process to wait for 
+waitToExitCode :: ProcessID-- ^ process to wait for
  -> Shell ExitCode -- ^ final exit code
 waitToExitCode pid = do
   state <- liftIO $ getProcessStatus True False pid
@@ -237,11 +234,11 @@ launchCmd args prepare cmd = do
   where execHandler (Left (e :: IOException)) = case ioe_type e of PermissionDenied  -> exitImmediately $ ExitFailure 126
                                                                    NoSuchThing       -> exitImmediately $ ExitFailure 127
                                                                    _                 -> exitImmediately $ ExitFailure 125
-        runUnchecked = getEnvironment >>= (executeFile cmd True args) . Just 
+        runUnchecked = getEnvironment >>= (executeFile cmd True args) . Just
         runInCurEnv = (Control.Exception.try $ runUnchecked) >>= execHandler
 
 -- |The 'doAssign' function expands a word and assigns it to a variable
-doAssign :: (String,String) -- ^ tuple containing the name of the program in the first component and the word to assign in its second one 
+doAssign :: (String,String) -- ^ tuple containing the name of the program in the first component and the word to assign in its second one
   -> Shell () -- ^ executable shell action
 doAssign (name,word) = (expandNoSplit execCmd word) >>= putVar name
 

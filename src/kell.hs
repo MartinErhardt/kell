@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 --   Copyright 2022 Martin Erhardt
 --
 --   Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +23,13 @@ import Exec
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Except
+import Control.Monad.Trans.Except (
+#if MIN_VERSION_transformers(0,6,0)
+  tryE
+#else
+  catchE, runExceptT, throwE, ExceptT
+#endif
+  )
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Lazy
 import qualified Control.Exception as Ex
@@ -112,8 +120,12 @@ interprete lineGetter lastEC = do
                                         Left  e  -> if ia then interprete lineGetter (getErrExitCode $ SyntaxErr (show e))
                                                           else throwE $ SyntaxErr (show e)
         escNLn cmd = if last cmd == '\\' then tail $ tail cmd else cmd
-        handleFetch ia lnew = case lnew of Right s -> Control.Monad.Trans.Except.tryE (interpreteCmd lineGetter (escNLn s)) >>= handleExec ia
+        handleFetch ia lnew = case lnew of Right s -> tryE (interpreteCmd lineGetter (escNLn s)) >>= handleExec ia
                                            Left  e -> return lastEC
+#if !MIN_VERSION_transformers(0,6,0)
+        tryE :: Monad m => ExceptT e m a -> ExceptT e m (Either e a)
+        tryE m = catchE (liftM Right m) (return . Left)
+#endif
 
 interpreteCmd :: IO (Either IOError String) -> String -> Shell ExitCode
 interpreteCmd lineGetter curCmd = do
