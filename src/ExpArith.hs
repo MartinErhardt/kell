@@ -15,23 +15,25 @@
 module ExpArith(
   expandArith
 )where
-import ShCommon(ShellError(..))
+
 import ShCommon
 
-import Data.Bits
-import Text.Parsec
-import Text.Parsec.String (Parser)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
+import Data.Bits
+import Data.Functor ((<&>))
+import Text.Parsec
+import Text.Parsec.String (Parser)
 import qualified Data.Map as Map
-import qualified Text.Parsec.Language as Lang
 import qualified Text.Parsec.Expr as Ex
+import qualified Text.Parsec.Language as Lang
 import qualified Text.Parsec.Token as Tok
 import qualified Text.Read as Rd
 
 type AParser a = ParsecT String () Shell a
+
 uOpMap = [[("~", complement)]
-         ,[("!", fromEnum . not . (>0) )] ]
+         ,[("!", fromEnum . (<= 0) )] ]
 bOpMap = [[("*",  (*))]
          ,[("/",  div)]
          ,[("%",  mod)]
@@ -53,8 +55,8 @@ bOpMap = [[("*",  (*))]
 
 lexer :: Tok.GenTokenParser String () Shell
 lexer = Tok.makeTokenParser style
-  where bOps = concat . fst . unzip $ (unzip <$> bOpMap)
-        uOps = concat . fst . unzip $ (unzip <$> uOpMap)
+  where bOps = concatMap fst (unzip <$> bOpMap)
+        uOps = concatMap fst (unzip <$> uOpMap)
         style = Lang.emptyDef
          {Tok.commentStart    = ""
          ,Tok.commentEnd      = ""
@@ -69,7 +71,7 @@ lexer = Tok.makeTokenParser style
          }
 
 numb :: AParser Int
-numb = Tok.natural lexer >>= return . fromIntegral
+numb = Tok.natural lexer <&> fromIntegral
 
 getVal :: String -> AParser Int
 getVal name = (lift . getVar) name >>= handleVar
@@ -86,20 +88,20 @@ getOp (op, f) = Tok.reservedOp lexer op >> return f
 assignExp :: AParser Int
 assignExp = do
   toAssign <- Tok.identifier lexer
-  opFunc   <- (foldl1 (<|>) (getOp <$> assignOps))
+  opFunc   <- foldl1 (<|>) (getOp <$> assignOps)
   oldval   <- getVal toAssign
-  newval   <- expr >>= return . opFunc oldval
-  lift $ putVar toAssign (show $ newval)
+  newval   <- expr <&> opFunc oldval
+  lift $ putVar toAssign (show newval)
   return newval
   where addEq = fmap (\(op,f) -> (op ++ "=",f))
-        assignOps = (++[("=",curry snd)]) . addEq . filter (\(s,_) -> s/= ">" && s/="<") $ concat bOpMap
+        assignOps = (++[("=",\_ x -> x)]) . addEq . filter (\(s,_) -> s/= ">" && s/="<") $ concat bOpMap
 
 baseExpr :: AParser Int
-baseExpr = Tok.parens lexer expr <|> try(assignExp) <|> getVarVal <|> numb
+baseExpr = Tok.parens lexer expr <|> try assignExp <|> getVarVal <|> numb
 
 expr :: AParser Int
 expr = Ex.buildExpressionParser table baseExpr
-  where table =( (((flip Ex.Infix $ Ex.AssocLeft) . getOp)  <$>) <$> bOpMap) ++ (((Ex.Prefix . getOp) <$>) <$> uOpMap)
+  where table =( (((`Ex.Infix` Ex.AssocLeft) . getOp) <$>) <$> bOpMap) ++ (((Ex.Prefix . getOp) <$>) <$> uOpMap)
 
 parseExpr :: AParser Int
 parseExpr = Tok.whiteSpace lexer *> expr <* eof
@@ -108,4 +110,4 @@ expandArith :: String -> Shell String
 expandArith s = do
   res <- runParserT parseExpr () "arithmetic expansion" s
   case res of Right s -> return . show $ s
-              Left e  -> throwE . ExpErr $ s ++ ": syntax error: " ++ (show e)
+              Left e  -> throwE . ExpErr $ s ++ ": syntax error: " ++ show e

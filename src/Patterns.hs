@@ -15,13 +15,14 @@
 module Patterns(
   expandPath
 )where
+
+import ShCommon
+
 import qualified Control.Exception as E
 import Control.Monad
-import ShCommon(ShellError(..))
-import ShCommon
+import System.Directory
 import Text.Parsec
 import Text.Parsec.String (Parser)
-import System.Directory
 import Text.Regex.TDFA
 
 pattern2Regex :: String -> String
@@ -46,13 +47,13 @@ patternParser = (eof >> return "")
             <|> (++) <$> (char '.' >> return "\\.") <*> patternParser
             <|> (++) <$> try classExp               <*> patternParser
             <|> (++) <$> try bracketExp             <*> patternParser
-            <|> (++) <$> (:[]) <$> anyChar          <*> patternParser
+            <|> ((++) . (:[]) <$> anyChar)          <*> patternParser
 
 -- TODO check permissions
 expandPathR :: String -> String -> IO [String]
 expandPathR restPath basePath = do
   case restrest of "" -> contentsFiltered
-                   _  -> foldl (++) [] <$> (contentsFiltered >>= mapM (expandPathR restrest) )
+                   _  -> concat <$> (contentsFiltered >>= mapM (expandPathR restrest) )
   where midP   = takeWhile (/='/') restPath
         restrest  = (dropWhile (=='/') . dropWhile (/='/')) restPath
         restSlash = (takeWhile (=='/') . dropWhile (/='/')) restPath
@@ -61,7 +62,7 @@ expandPathR restPath basePath = do
         baseLookup = case basePath of "" -> "./"
                                       _  -> basePath
         lookupDir = E.catch (getDirectoryContents baseLookup) lookupHandler
-        isMatch = filter ((==) <$> ( =~ (pattern2Regex midP) ) <*> id)
+        isMatch = filter ((==) <$> ( =~ pattern2Regex midP ) <*> id)
         contents = if midP == "" || head midP == '.' then lookupDir
                    else filter ((/='.') . head) <$> lookupDir
         contentsFiltered = fmap ( ((++ restSlash) . (basePath ++) <$>) . isMatch) contents
